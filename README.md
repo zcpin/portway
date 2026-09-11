@@ -120,7 +120,10 @@ cd client
 flutter run -d windows        # 或 macos / linux
 ```
 
-客户端会自动发现并连接 daemon。若 daemon 未运行，界面会提示启动命令。
+客户端会自动发现并连接 daemon。若 daemon 未运行，且客户端旁带有
+`ssh-tunnel-daemon.exe`（发布版已随程序分发），客户端会**自动拉起它**并等待就绪；
+仅用 `flutter run` 调试时，会自动向上查找源码仓库里的 `daemon/bin/ssh-tunnel-daemon.exe`。
+拉起后 daemon 独立常驻：关闭或退出客户端都不影响隧道。
 
 ### 3. 配置隧道
 
@@ -145,6 +148,9 @@ remote_host = "127.0.0.1"
 remote_port = 3306
 ```
 
+> 重连字段（`reconnect_strategy` / `reconnect_interval` / `max_reconnect_attempts`）可以省略：
+> 此时使用**全局默认值**，见 `ssh-tunnel.example.toml` 顶部注释，或在客户端「设置」页里修改。
+
 启动后即可连接本地端口：
 
 ```bash
@@ -161,12 +167,22 @@ ssh-keyscan example.com >> ~/.ssh/known_hosts
 
 ## 客户端托盘
 
-关闭窗口时会弹出确认，可选：
+关闭窗口时会弹出确认（可在「设置」页改成默认直接收进托盘或直接退出），可选：
 
 - **收进托盘** —— 程序继续在后台运行，隧道不受影响；点击托盘图标或菜单「显示窗口」恢复
 - **退出程序** —— 完全关闭客户端（daemon 与隧道仍在运行）
 
 托盘菜单会显示当前运行中的隧道数量。
+
+## 客户端设置与关于
+
+左侧导航除隧道管理外，还有「设置」与「关于」两个页面：
+
+- **设置**：
+  - 关闭窗口行为的默认动作（客户端本地偏好，存于 `~/.ssh-tunnel/client_settings.json`）
+  - 隧道重连的**全局默认值**（重连策略 / 间隔 / 最大次数 / 日志级别），写入 daemon 配置，
+    未单独配置这些字段的隧道回退使用；保存后受影响的运行中隧道会重启以应用新配置
+- **关于**：程序简介、快速上手步骤、GitHub 仓库地址
 
 ## 命令行
 
@@ -208,6 +224,8 @@ ssh-tunnel-daemon service <动作>       系统服务托管
 | GET | `/api/logs` | 日志缓冲 |
 | GET | `/api/status` | 所有隧道的运行状态（`{名称: 是否运行}`） |
 | POST | `/api/reload` | 重新加载配置 |
+| GET | `/api/config` | 全局配置（日志级别、重连默认值） |
+| PUT | `/api/config` | 更新全局配置（未单独配置的隧道会套用新默认值并重启） |
 | GET | `/ws` | WebSocket 事件流 |
 
 写接口的请求体上限为 1 MiB，字段名写错会直接返回 400。
@@ -254,6 +272,54 @@ flutter test
 ```
 
 每次 push / PR 会由 `.github/workflows/ci.yml` 执行以上检查（Go 侧含 `gofmt` 校验与 `-race` 测试）。
+
+## 打包安装包（Windows）
+
+一键脚本会同时产出**安装包**与**便携 zip** 两种形式：
+
+```bash
+scripts/build_windows.bat [版本号]
+```
+
+产物在 `dist/`：
+
+- `ssh-tunnel-setup-<版本>.exe` —— Inno Setup 安装程序
+- `ssh-tunnel-portable-<版本>.zip` —— 便携版，解压即用
+
+步骤：`flutter build windows --release` → `go build` 并把 daemon 拷入客户端发布目录（同目录是客户端自动拉起 daemon 的前提）→ 复制示例配置 → Inno Setup 打包 → 压缩便携 zip。
+
+前置条件：
+
+- Flutter / Go / VS Build Tools 在 PATH
+- 打包安装程序需要 Inno Setup 6（未安装时脚本会跳过安装包、仍产出便携 zip）：
+  `winget install JRSoftware.InnoSetup`
+
+### GitHub Actions 发布
+
+推 `v*` 标签（或手动触发 `Actions → Release → Run workflow`）会在各平台 runner 上构建并上传产物，推送标签时还会统一发布到对应的 GitHub Release：
+
+```bash
+git tag v1.2.3
+git push origin v1.2.3
+```
+
+各平台产物：
+
+| 平台 | 产物 |
+|---|---|
+| Windows | `ssh-tunnel-setup-<版本>.exe`（安装包）+ `ssh-tunnel-portable-<版本>.zip`（便携版） |
+| Linux | `ssh-tunnel-portable-<版本>-linux-x64.tar.gz` |
+| macOS | `ssh-tunnel-portable-<版本>-macos-<arch>.zip`（跟随 runner 架构，arm64 / x64） |
+
+> macOS 为 ad-hoc 签名、未公证，分发给其它 Mac 首次需右键「打开」绕过 Gatekeeper；
+> 正式分发建议补上 Developer ID 签名与 notarization。
+
+安装程序为**按用户安装**（无需管理员权限），安装到
+`%LOCALAPPDATA%\Programs\SSH Tunnel Manager`，创建开始菜单与桌面快捷方式。
+配置与服务发现文件仍写在用户目录 `~/.ssh-tunnel/`，卸载不会残留。
+
+需要管理员级（Program Files）安装时，把 `installer.iss` 里的
+`PrivilegesRequired=lowest` 改为 `admin`、`DefaultDirName` 改为 `{autopf}\SSH Tunnel Manager` 即可。
 
 ## 已知限制
 

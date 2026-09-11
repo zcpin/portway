@@ -1,0 +1,237 @@
+name: Release
+
+# 在推送 v* 标签或手动触发时，构建各平台发布产物并上传：
+#   Windows：ssh-tunnel-setup-<版本>.exe（Inno Setup 安装包）
+#            ssh-tunnel-portable-<版本>.zip（便携版）
+#   Linux：  ssh-tunnel-portable-<版本>-linux-x64.tar.gz
+#   macOS：  ssh-tunnel-portable-<版本>-macos-<arch>.zip
+# 推送标签时，publish job 会把三平台产物统一发布到对应的 GitHub Release。
+#
+# 用法：
+#   git tag v1.2.3 && git push origin v1.2.3
+#   或在 GitHub 页面 Actions → Release → Run workflow 手动触发（版本号取 ci-<run>）
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write # 发布到 GitHub Release
+  actions: write  # 上传 / 下载 workflow 工件
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows (installer + portable zip)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: daemon/go.mod
+          cache-dependency-path: daemon/go.sum
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      # 版本号：优先取 git 标签（去掉前导 v），手动触发时用运行序号。
+      - name: Resolve version
+        shell: pwsh
+        run: |
+          $v = $env:GITHUB_REF_NAME
+          if ($v -and $v.StartsWith('v')) { $v = $v.Substring(1) }
+          if (-not $v) { $v = "ci-$env:GITHUB_RUN_NUMBER" }
+          "VERSION=$v" >> $env:GITHUB_ENV
+
+      # Inno Setup 6 官方安装包静默安装（installer.iss 打包需要）。
+      - name: Install Inno Setup 6
+        shell: pwsh
+        run: |
+          $is = "$env:TEMP\innosetup-6.exe"
+          Invoke-WebRequest -Uri "https://jrsoftware.org/download.php/is.exe" -OutFile $is
+          $p = Start-Process -FilePath $is -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Write-Error "Inno Setup install failed: $($p.ExitCode)"; exit $p.ExitCode }
+
+      # 复用本地一键脚本：flutter build + go build + 拷入 daemon + Inno 打包 + 便携 zip。
+      - name: Build daemon + client + installer + portable zip
+        shell: cmd
+        run: scripts\build_windows.bat %VERSION%
+
+      - name: Verify artifacts
+        shell: pwsh
+        run: |
+          foreach ($f in @("dist\ssh-tunnel-setup-$env:VERSION.exe", "dist\ssh-tunnel-portable-$env:VERSION.zip")) {
+            if (-not (Test-Path $f)) { Write-Error "Missing artifact: $f"; exit 1 }
+          }
+
+      - name: Generate checksums
+        shell: pwsh
+        run: |
+          Get-FileHash "dist\ssh-tunnel-setup-$env:VERSION.exe", "dist\ssh-tunnel-portable-$env:VERSION.zip" -Algorithm SHA256 |
+            ForEach-Object { "{0}  {1}" -f $_.Hash.ToLower(), [IO.Path]::GetFileName($_.Path) } |
+            Out-File -Encoding ascii "dist\SHA256SUMS-windows"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ssh-tunnel-windows-${{ env.VERSION }}
+          path: |
+            dist/*.exe
+            dist/*.zip
+            dist/SHA256SUMS-windows
+
+  linux:
+    name: Linux (portable tar.gz)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: daemon/go.mod
+          cache-dependency-path: daemon/go.sum
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install Linux build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libgtk-3-dev liblzma-dev clang cmake pkg-config
+
+      - name: Resolve version
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          if [ -z "$v" ]; then v="ci-${GITHUB_RUN_NUMBER}"; fi
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+
+      - name: Build Flutter Linux client
+        run: |
+          cd client
+          flutter build linux --release
+
+      # daemon 与客户端同目录，客户端启动时据此自动拉起。
+      - name: Build daemon into bundle
+        run: |
+          bundle=client/build/linux/x64/release/bundle
+          cd daemon
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
+            -ldflags "-s -w -X main.version=$VERSION" \
+            -o "../$bundle/ssh-tunnel-daemon" ./cmd/ssh-tunnel
+
+      - name: Copy sample config
+        run: cp daemon/ssh-tunnel.example.toml client/build/linux/x64/release/bundle/
+
+      - name: Pack portable tar.gz
+        run: |
+          mkdir -p dist
+          tar -C client/build/linux/x64/release/bundle -czf "dist/ssh-tunnel-portable-$VERSION-linux-x64.tar.gz" .
+
+      - name: Generate checksums
+        run: |
+          (cd dist && sha256sum "ssh-tunnel-portable-$VERSION-linux-x64.tar.gz") > "dist/SHA256SUMS-linux"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ssh-tunnel-linux-${{ env.VERSION }}
+          path: |
+            dist/*.tar.gz
+            dist/SHA256SUMS-linux
+
+  macos:
+    name: macOS (portable zip)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: daemon/go.mod
+          cache-dependency-path: daemon/go.sum
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Resolve version and arch
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          if [ -z "$v" ]; then v="ci-${GITHUB_RUN_NUMBER}"; fi
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+          case "$(uname -m)" in
+            arm64|aarch64) goarch=arm64 ;;
+            x86_64|amd64)  goarch=amd64 ;;
+            *)             goarch=amd64 ;;
+          esac
+          echo "GOARCH=$goarch" >> "$GITHUB_ENV"
+
+      - name: Build Flutter macOS client
+        run: |
+          cd client
+          flutter build macos --release
+
+      # daemon 打进 .app 的 MacOS 目录，与客户端可执行文件同目录。
+      - name: Build daemon into .app
+        run: |
+          app=client/build/macos/Build/Products/Release/ssh_tunnel_client.app
+          cd daemon
+          CGO_ENABLED=0 GOOS=darwin GOARCH=$GOARCH go build -trimpath \
+            -ldflags "-s -w -X main.version=$VERSION" \
+            -o "../$app/Contents/MacOS/ssh-tunnel-daemon" ./cmd/ssh-tunnel
+
+      - name: Copy sample config
+        run: cp daemon/ssh-tunnel.example.toml client/build/macos/Build/Products/Release/ssh_tunnel_client.app/Contents/Resources/
+
+      # 无开发者证书，做 ad-hoc 签名（--deep 会一并签名 Flutter 框架与嵌入的 daemon）；
+      # 分发到其它 Mac 首次需右键「打开」绕过 Gatekeeper。
+      - name: Ad-hoc codesign
+        run: |
+          app=client/build/macos/Build/Products/Release/ssh_tunnel_client.app
+          codesign --force --deep --sign - "$app"
+
+      - name: Pack portable zip
+        run: |
+          mkdir -p dist
+          ditto -c -k --sequesterRsrc --keepParent \
+            client/build/macos/Build/Products/Release/ssh_tunnel_client.app \
+            "dist/ssh-tunnel-portable-$VERSION-macos-$GOARCH.zip"
+
+      - name: Generate checksums
+        run: |
+          (cd dist && shasum -a 256 "ssh-tunnel-portable-$VERSION-macos-$GOARCH.zip") > "dist/SHA256SUMS-macos"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ssh-tunnel-macos-${{ env.VERSION }}
+          path: |
+            dist/*.zip
+            dist/SHA256SUMS-macos
+
+  # 推送标签时，把三平台的产物统一附加到对应的 GitHub Release。
+  publish:
+    name: Publish to GitHub Release
+    needs: [windows, linux, macos]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Attach assets to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --generate-notes 2>/dev/null || true
+          gh release upload "$GITHUB_REF_NAME" release-assets/* --clobber

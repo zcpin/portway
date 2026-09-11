@@ -3,6 +3,7 @@
 daemon/bin/
 client/build/
 client/.dart_tool/
+dist/
 
 # 本地配置与运行时文件
 daemon/keys/

@@ -14,10 +14,26 @@ import (
 
 // Config represents the main configuration structure
 type Config struct {
-	LogLevel       string          `toml:"log_level"`
+	LogLevel string `toml:"log_level"`
+
+	// 全局重连默认值：单个隧道未显式配置对应字段时回退使用
+	//（例如只写策略、不写间隔的隧道会套用这里的间隔）。
+	ReconnectStrategy    string `toml:"reconnect_strategy,omitempty"`
+	ReconnectInterval    string `toml:"reconnect_interval,omitempty"`
+	MaxReconnectAttempts int    `toml:"max_reconnect_attempts,omitempty"`
+
 	SSHConnections []SSHConnection `toml:"ssh_connections"`
 	Tunnels        []Tunnel        `toml:"tunnels"`
 	configDir      string
+}
+
+// GlobalSettings 是客户端「设置」页可编辑的全局配置项，
+// 对应 Config 的顶层字段，与单个隧道/SSH 连接的增删改分开维护。
+type GlobalSettings struct {
+	LogLevel             string `json:"log_level"`
+	ReconnectStrategy    string `json:"reconnect_strategy"`
+	ReconnectInterval    string `json:"reconnect_interval"`
+	MaxReconnectAttempts int    `json:"max_reconnect_attempts"`
 }
 
 // SSHConnection represents a reusable SSH connection configuration
@@ -114,6 +130,25 @@ func Load(configPath string) (*Config, error) {
 
 // Validate validates the configuration
 func (c *Config) Validate() error {
+	// 全局重连默认值：先校验并补齐，单个隧道未配置对应字段时回退使用。
+	if strings.TrimSpace(c.ReconnectStrategy) == "" {
+		c.ReconnectStrategy = "fixed"
+	}
+	if c.ReconnectStrategy != "fixed" && c.ReconnectStrategy != "exponential" {
+		return fmt.Errorf("reconnect_strategy must be 'fixed' or 'exponential', got %q", c.ReconnectStrategy)
+	}
+	if strings.TrimSpace(c.ReconnectInterval) == "" {
+		c.ReconnectInterval = "5s"
+	}
+	if d, err := time.ParseDuration(c.ReconnectInterval); err != nil {
+		return fmt.Errorf("invalid reconnect_interval: %w", err)
+	} else if d <= 0 {
+		return fmt.Errorf("reconnect_interval must be greater than 0, got %s", c.ReconnectInterval)
+	}
+	if c.MaxReconnectAttempts < 0 {
+		return fmt.Errorf("max_reconnect_attempts must be >= 0, got %d", c.MaxReconnectAttempts)
+	}
+
 	// Build SSH connection map
 	sshConnMap := make(map[string]SSHConnection)
 	for _, conn := range c.SSHConnections {
@@ -179,7 +214,7 @@ func (c *Config) Validate() error {
 
 		// Validate reconnect strategy
 		if tunnel.ReconnectStrategy == "" {
-			tunnel.ReconnectStrategy = "fixed"
+			tunnel.ReconnectStrategy = c.ReconnectStrategy
 		}
 		if tunnel.ReconnectStrategy != "fixed" && tunnel.ReconnectStrategy != "exponential" {
 			return fmt.Errorf("tunnel %s: reconnect_strategy must be 'fixed' or 'exponential'", tunnel.Name)
@@ -187,7 +222,7 @@ func (c *Config) Validate() error {
 
 		// Validate reconnect interval
 		if tunnel.ReconnectInterval == "" {
-			tunnel.ReconnectInterval = "5s"
+			tunnel.ReconnectInterval = c.ReconnectInterval
 		}
 		interval, err := time.ParseDuration(tunnel.ReconnectInterval)
 		if err != nil {
@@ -196,6 +231,11 @@ func (c *Config) Validate() error {
 		// 0 或负数会让重连变成空转热循环，必须在这里拦下
 		if interval <= 0 {
 			return fmt.Errorf("tunnel %s: reconnect_interval must be greater than 0, got %s", tunnel.Name, tunnel.ReconnectInterval)
+		}
+
+		// 最大重试次数回退到全局值；0 表示无限重试
+		if tunnel.MaxReconnectAttempts == 0 {
+			tunnel.MaxReconnectAttempts = c.MaxReconnectAttempts
 		}
 
 		if err := validateHostKeyCheck("tunnel "+tunnel.Name, tunnel.HostKeyCheck); err != nil {
@@ -269,10 +309,9 @@ func (c *Config) ParseTunnels() ([]ParsedTunnel, error) {
 		}
 		sshHost = normalizedSSHHost
 
-		// Check if key file exists
-		if _, err := os.Stat(keyFile); err != nil {
-			return nil, fmt.Errorf("tunnel %s: key file not found: %s", tunnel.Name, keyFile)
-		}
+		// 密钥文件此时不必存在：缺失时会在隧道启动时给出明确错误
+		//（见 tunnel.createSSHConnection），避免一条失效配置（如密钥被
+		// 移动、换机后路径失效）让整个 daemon 起不来、客户端连 UI 都进不去。
 
 		// Parse reconnect interval
 		interval, err := time.ParseDuration(tunnel.ReconnectInterval)

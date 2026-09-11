@@ -114,6 +114,8 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("GET /api/logs", s.auth(http.HandlerFunc(s.handleLogs)))
 	mux.Handle("POST /api/reload", s.auth(http.HandlerFunc(s.handleReload)))
 	mux.Handle("GET /api/status", s.auth(http.HandlerFunc(s.handleStatus)))
+	mux.Handle("GET /api/config", s.auth(http.HandlerFunc(s.handleGetConfig)))
+	mux.Handle("PUT /api/config", s.auth(http.HandlerFunc(s.handleUpdateConfig)))
 
 	return mux
 }

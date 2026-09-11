@@ -170,6 +170,114 @@ func TestParseTunnelsDefaultsToKnownHostsCheck(t *testing.T) {
 	}
 }
 
+func TestGlobalReconnectDefaultsFallback(t *testing.T) {
+	keyPath := writeKeyFile(t, t.TempDir())
+	cfgPath := writeConfig(t, fmt.Sprintf(`
+reconnect_strategy = "exponential"
+reconnect_interval = "30s"
+max_reconnect_attempts = 4
+
+[[ssh_connections]]
+name = "c1"
+host = "example.com:22"
+user = "root"
+key_file = %q
+
+[[tunnels]]
+name = "t1"
+ssh_connection = "c1"
+local_port = 13306
+remote_host = "127.0.0.1"
+remote_port = 3306
+
+[[tunnels]]
+name = "t2"
+ssh_connection = "c1"
+local_port = 13307
+remote_host = "127.0.0.1"
+remote_port = 3307
+reconnect_interval = "10s"
+max_reconnect_attempts = 2
+`, keyPath))
+
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+
+	parsed, err := cfg.ParseTunnels()
+	if err != nil {
+		t.Fatalf("ParseTunnels() error = %v", err)
+	}
+	if len(parsed) != 2 {
+		t.Fatalf("parsed tunnels = %d, want 2", len(parsed))
+	}
+
+	// t1 未显式配置重连字段，应回退到全局值
+	if parsed[0].ReconnectStrategy != StrategyExponential {
+		t.Errorf("t1 ReconnectStrategy = %q, want %q", parsed[0].ReconnectStrategy, StrategyExponential)
+	}
+	if parsed[0].ReconnectInterval != 30*time.Second {
+		t.Errorf("t1 ReconnectInterval = %v, want %v", parsed[0].ReconnectInterval, 30*time.Second)
+	}
+	if parsed[0].MaxReconnectAttempts != 4 {
+		t.Errorf("t1 MaxReconnectAttempts = %d, want 4", parsed[0].MaxReconnectAttempts)
+	}
+
+	// t2 显式配置了间隔与次数，应保留自己的值；策略仍回退到全局
+	if parsed[1].ReconnectStrategy != StrategyExponential {
+		t.Errorf("t2 ReconnectStrategy = %q, want %q", parsed[1].ReconnectStrategy, StrategyExponential)
+	}
+	if parsed[1].ReconnectInterval != 10*time.Second {
+		t.Errorf("t2 ReconnectInterval = %v, want %v", parsed[1].ReconnectInterval, 10*time.Second)
+	}
+	if parsed[1].MaxReconnectAttempts != 2 {
+		t.Errorf("t2 MaxReconnectAttempts = %d, want 2", parsed[1].MaxReconnectAttempts)
+	}
+}
+
+func TestConfigIOSetGlobalSettingsPersists(t *testing.T) {
+	keyPath := writeKeyFile(t, t.TempDir())
+	cfgPath := writeConfig(t, keyFileConfig(keyPath, "5s"))
+
+	cio, err := NewConfigIO(cfgPath)
+	if err != nil {
+		t.Fatalf("NewConfigIO() error = %v", err)
+	}
+	if err := cio.SetGlobalSettings(GlobalSettings{
+		LogLevel:             "debug",
+		ReconnectStrategy:    "exponential",
+		ReconnectInterval:    "30s",
+		MaxReconnectAttempts: 4,
+	}); err != nil {
+		t.Fatalf("SetGlobalSettings() error = %v", err)
+	}
+
+	// 重新加载验证已写回文件，且隧道内容不受影响
+	reloaded, err := Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if reloaded.LogLevel != "debug" {
+		t.Errorf("LogLevel = %q, want %q", reloaded.LogLevel, "debug")
+	}
+	if reloaded.ReconnectStrategy != "exponential" {
+		t.Errorf("ReconnectStrategy = %q, want %q", reloaded.ReconnectStrategy, "exponential")
+	}
+	if reloaded.ReconnectInterval != "30s" {
+		t.Errorf("ReconnectInterval = %q, want %q", reloaded.ReconnectInterval, "30s")
+	}
+	if reloaded.MaxReconnectAttempts != 4 {
+		t.Errorf("MaxReconnectAttempts = %d, want 4", reloaded.MaxReconnectAttempts)
+	}
+	if len(reloaded.Tunnels) != 1 {
+		t.Errorf("Tunnels = %d, want 1", len(reloaded.Tunnels))
+	}
+}
+
 func TestHostKeyCheckValidation(t *testing.T) {
 	for _, value := range []string{"insecure", "known_hosts"} {
 		t.Run(value, func(t *testing.T) {

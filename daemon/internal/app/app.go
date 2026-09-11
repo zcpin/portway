@@ -202,6 +202,20 @@ func (a *App) GetSSHConnections() []config.SSHConnection {
 	return a.mgr.GetSSHConnections()
 }
 
+// GetGlobalSettings 返回全局配置项（日志级别、重连默认值）。
+func (a *App) GetGlobalSettings() config.GlobalSettings {
+	return a.mgr.GetGlobalSettings()
+}
+
+// SetGlobalSettings 更新全局配置项；运行中的隧道若套用了新默认值会被重启。
+func (a *App) SetGlobalSettings(s config.GlobalSettings) error {
+	if err := a.mgr.SetGlobalSettings(s); err != nil {
+		return err
+	}
+	a.emitStatus()
+	return nil
+}
+
 func (a *App) AddSSHConnection(conn config.SSHConnection) error {
 	return a.mgr.AddSSHConnection(conn)
 }

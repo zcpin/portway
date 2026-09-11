@@ -167,6 +167,22 @@ func (m *Manager) GetConfig() *config.Config {
 	return m.configIO.GetConfig()
 }
 
+// GetGlobalSettings 返回全局配置项（日志级别、重连默认值）。
+func (m *Manager) GetGlobalSettings() config.GlobalSettings {
+	return m.configIO.GlobalSettings()
+}
+
+// SetGlobalSettings 更新全局配置项并重载隧道。
+//
+// 重载会让未显式配置重连字段的隧道立刻套用新默认值（其运行状态会随之
+// 停止再启动）；显式配置了自己的重连字段的隧道不受影响。
+func (m *Manager) SetGlobalSettings(s config.GlobalSettings) error {
+	if err := m.configIO.SetGlobalSettings(s); err != nil {
+		return err
+	}
+	return m.reloadInternal()
+}
+
 // GetSSHConnections returns all SSH connections
 func (m *Manager) GetSSHConnections() []config.SSHConnection {
 	return m.configIO.GetConfig().SSHConnections

@@ -8,10 +8,14 @@ import 'models.dart';
 import 'providers.dart';
 import 'services/daemon_client.dart';
 import 'services/daemon_discovery.dart';
+import 'services/daemon_launcher.dart';
+import 'services/settings_store.dart';
 import 'services/tray.dart';
+import 'pages/about_page.dart';
 import 'pages/connections_page.dart';
 import 'pages/keys_page.dart';
 import 'pages/logs_page.dart';
+import 'pages/settings_page.dart';
 import 'pages/tunnels_page.dart';
 
 /// 强制本机回环请求不走系统代理。
@@ -95,6 +99,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WindowListener {
     (icon: Icons.dns_outlined, label: 'SSH 连接'),
     (icon: Icons.key_outlined, label: '密钥'),
     (icon: Icons.terminal_outlined, label: '日志'),
+    (icon: Icons.settings_outlined, label: '设置'),
+    (icon: Icons.info_outline, label: '关于'),
+  ];
+
+  /// 「设置」页在导航中的下标；其后的页面（设置、关于）不依赖 daemon，断开时也能访问。
+  static const _settingsIndex = 4;
+
+  /// 导航对应的页面。设置 / 关于无需连接 daemon 即可渲染。
+  static const _pages = <Widget>[
+    TunnelsPage(),
+    ConnectionsPage(),
+    KeysPage(),
+    LogsPage(),
+    SettingsPage(),
+    AboutPage(),
   ];
 
   @override
@@ -107,6 +126,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WindowListener {
       onQuit: _quit,
     );
     _tray.init();
+
+    // 提前加载本地偏好（关闭动作），首次关闭窗口前确保可用
+    SettingsStore.instance.load();
 
     // 首帧后再拉历史日志，避免拖慢启动
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -123,15 +145,24 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WindowListener {
 
   /// 关闭窗口时收进系统托盘，让程序继续在后台运行。
   ///
-  /// 隧道由 daemon 维持，客户端窗口关掉不影响隧道；
+  /// 默认弹出确认对话框；用户可在「设置」页把默认动作改为直接收进托盘
+  /// 或直接退出。隧道由 daemon 维持，客户端窗口关掉不影响隧道；
   /// 真正退出只能走关闭确认里的「退出程序」或托盘菜单的「退出」。
   @override
   void onWindowClose() async {
-    final minimize = await _confirmClose();
-    if (!minimize) return;
-
-    await windowManager.hide();
-    await _tray.init(); // 确保托盘图标仍在（可能被系统清理）
+    await SettingsStore.instance.load();
+    switch (SettingsStore.instance.closeAction) {
+      case CloseAction.quit:
+        await _quit();
+      case CloseAction.tray:
+        await windowManager.hide();
+        await _tray.init(); // 确保托盘图标仍在（可能被系统清理）
+      case CloseAction.ask:
+        final minimize = await _confirmClose();
+        if (!minimize) return;
+        await windowManager.hide();
+        await _tray.init();
+    }
   }
 
   /// 询问用户是收进托盘还是退出，返回 true 表示收进托盘。
@@ -243,17 +274,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WindowListener {
                         const Center(child: CircularProgressIndicator()),
                     error: (e, _) => _DaemonMissing(message: e.toString()),
                     data: (client) {
-                      if (client == null) {
+                      // 设置 / 关于不依赖 daemon，断开时仍可访问；
+                      // 其余页面需要连接，未连接时显示引导页。
+                      if (client == null && _selected < _settingsIndex) {
                         return const _DaemonMissing();
                       }
                       return IndexedStack(
                         index: _selected,
-                        children: const [
-                          TunnelsPage(),
-                          ConnectionsPage(),
-                          KeysPage(),
-                          LogsPage(),
-                        ],
+                        children: _pages,
                       );
                     },
                   ),
@@ -361,12 +389,27 @@ class _DaemonMissing extends ConsumerWidget {
                   ],
                 ),
                 const SizedBox(height: 16),
-                const Text('请先启动本地守护进程，客户端会自动发现并连接它：'),
+                const Text(
+                    '客户端会在启动时自动拉起随程序分发的 daemon。'
+                    '若自动启动失败，也可手动启动本地守护进程：'),
                 const SizedBox(height: 12),
                 const _CodeBlock(
                   'cd daemon\n'
                   'go build -o bin/ssh-tunnel-daemon.exe ./cmd/ssh-tunnel\n'
                   'bin/ssh-tunnel-daemon.exe -config ssh-tunnel.toml',
+                ),
+                const SizedBox(height: 16),
+                FilledButton.icon(
+                  onPressed: () async {
+                    await DaemonLauncher.ensureRunning();
+                    // 重新读取发现文件并重新探活；其余数据状态随之级联刷新
+                    ref.invalidate(discoveryProvider);
+                    ref.invalidate(tunnelsProvider);
+                    ref.invalidate(sshConnectionsProvider);
+                    ref.invalidate(keysProvider);
+                  },
+                  icon: const Icon(Icons.play_arrow),
+                  label: const Text('启动本地 daemon'),
                 ),
                 const SizedBox(height: 16),
                 Text('客户端会依次检查以下位置（按优先级）：',

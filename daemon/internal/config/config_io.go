@@ -3,7 +3,9 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/BurntSushi/toml"
 )
@@ -41,7 +43,10 @@ func (cio *ConfigIO) GetConfig() *Config {
 
 	// Return a deep copy to prevent concurrent modification
 	result := &Config{
-		LogLevel: cio.config.LogLevel,
+		LogLevel:             cio.config.LogLevel,
+		ReconnectStrategy:    cio.config.ReconnectStrategy,
+		ReconnectInterval:    cio.config.ReconnectInterval,
+		MaxReconnectAttempts: cio.config.MaxReconnectAttempts,
 		// configDir 未导出，必须手动带上：否则拿到副本的一方解析相对路径时
 		// 会丢掉「配置文件所在目录」这一候选位置
 		configDir: cio.config.configDir,
@@ -64,6 +69,72 @@ func (cio *ConfigIO) Replace(cfg *Config) {
 	cio.mu.Lock()
 	defer cio.mu.Unlock()
 	cio.config = cfg
+}
+
+// GlobalSettings 返回当前全局配置项（日志级别、重连默认值）。
+//
+// 未在配置文件中显式给出的字段返回生效的默认值（与 Config.Validate 一致），
+// 客户端据此回显，而不是看到一堆空字符串。
+func (cio *ConfigIO) GlobalSettings() GlobalSettings {
+	cio.mu.RLock()
+	defer cio.mu.RUnlock()
+
+	s := GlobalSettings{
+		LogLevel:             cio.config.LogLevel,
+		ReconnectStrategy:    cio.config.ReconnectStrategy,
+		ReconnectInterval:    cio.config.ReconnectInterval,
+		MaxReconnectAttempts: cio.config.MaxReconnectAttempts,
+	}
+	if s.LogLevel == "" {
+		s.LogLevel = "info"
+	}
+	if s.ReconnectStrategy == "" {
+		s.ReconnectStrategy = "fixed"
+	}
+	if s.ReconnectInterval == "" {
+		s.ReconnectInterval = "5s"
+	}
+	return s
+}
+
+// SetGlobalSettings 更新全局配置项并写回配置文件。
+//
+// 只改动顶层字段，不会触碰 ssh_connections / tunnels 的内容。
+// 校验规则与 Config.Validate 保持一致。
+func (cio *ConfigIO) SetGlobalSettings(s GlobalSettings) error {
+	cio.mu.Lock()
+	defer cio.mu.Unlock()
+
+	s.LogLevel = strings.TrimSpace(s.LogLevel)
+	s.ReconnectStrategy = strings.TrimSpace(s.ReconnectStrategy)
+	s.ReconnectInterval = strings.TrimSpace(s.ReconnectInterval)
+
+	if s.ReconnectStrategy == "" {
+		s.ReconnectStrategy = "fixed"
+	}
+	if s.ReconnectStrategy != "fixed" && s.ReconnectStrategy != "exponential" {
+		return fmt.Errorf("reconnect_strategy must be 'fixed' or 'exponential', got %q", s.ReconnectStrategy)
+	}
+
+	if s.ReconnectInterval == "" {
+		s.ReconnectInterval = "5s"
+	}
+	if d, err := time.ParseDuration(s.ReconnectInterval); err != nil {
+		return fmt.Errorf("invalid reconnect_interval: %w", err)
+	} else if d <= 0 {
+		return fmt.Errorf("reconnect_interval must be greater than 0, got %s", s.ReconnectInterval)
+	}
+
+	if s.MaxReconnectAttempts < 0 {
+		return fmt.Errorf("max_reconnect_attempts must be >= 0, got %d", s.MaxReconnectAttempts)
+	}
+
+	cio.config.LogLevel = s.LogLevel
+	cio.config.ReconnectStrategy = s.ReconnectStrategy
+	cio.config.ReconnectInterval = s.ReconnectInterval
+	cio.config.MaxReconnectAttempts = s.MaxReconnectAttempts
+
+	return cio.save()
 }
 
 // AddTunnel adds a new tunnel to the configuration

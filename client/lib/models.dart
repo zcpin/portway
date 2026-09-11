@@ -215,6 +215,51 @@ class DaemonInfo {
   String get wsBase => 'ws://$host:$port';
 }
 
+/// daemon 的全局配置项（日志级别、重连默认值），对应 GET/PUT /api/config。
+///
+/// 单个隧道未显式配置重连字段时，会回退使用这里的默认值。
+class GlobalSettings {
+  final String logLevel;
+  final String reconnectStrategy;
+  final String reconnectInterval;
+  final int maxReconnectAttempts;
+
+  const GlobalSettings({
+    required this.logLevel,
+    required this.reconnectStrategy,
+    required this.reconnectInterval,
+    required this.maxReconnectAttempts,
+  });
+
+  factory GlobalSettings.fromJson(Map<String, dynamic> j) => GlobalSettings(
+        logLevel: j['log_level'] as String? ?? '',
+        reconnectStrategy: j['reconnect_strategy'] as String? ?? 'fixed',
+        reconnectInterval: j['reconnect_interval'] as String? ?? '5s',
+        maxReconnectAttempts: _asInt(j['max_reconnect_attempts']),
+      );
+
+  Map<String, dynamic> toJson() => {
+        'log_level': logLevel,
+        'reconnect_strategy': reconnectStrategy,
+        'reconnect_interval': reconnectInterval,
+        'max_reconnect_attempts': maxReconnectAttempts,
+      };
+
+  GlobalSettings copyWith({
+    String? logLevel,
+    String? reconnectStrategy,
+    String? reconnectInterval,
+    int? maxReconnectAttempts,
+  }) =>
+      GlobalSettings(
+        logLevel: logLevel ?? this.logLevel,
+        reconnectStrategy: reconnectStrategy ?? this.reconnectStrategy,
+        reconnectInterval: reconnectInterval ?? this.reconnectInterval,
+        maxReconnectAttempts:
+            maxReconnectAttempts ?? this.maxReconnectAttempts,
+      );
+}
+
 int _asInt(dynamic v) {
   if (v is int) return v;
   if (v is num) return v.toInt();

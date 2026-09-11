@@ -113,6 +113,16 @@ class DaemonClient {
 
   Future<void> reload() => _post('/api/reload', null);
 
+  /// 读取全局配置项（日志级别、重连默认值）。
+  Future<GlobalSettings> getGlobalSettings() async {
+    final resp = await _dio.get('/api/config');
+    return GlobalSettings.fromJson(resp.data);
+  }
+
+  /// 更新全局配置项；套用了新默认值的运行中隧道会被重启。
+  Future<void> updateGlobalSettings(GlobalSettings s) =>
+      _put('/api/config', s.toJson());
+
   /// 连接 WebSocket 事件流，断线后自动重连，直到 [close] 被调用。
   ///
   /// 事件格式：{"type":"status","status":{...}} 或 {"type":"log","log":{...}}

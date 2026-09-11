@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models.dart';
 import '../services/daemon_client.dart';
 import '../services/daemon_discovery.dart';
+import '../services/daemon_launcher.dart';
 
 /// riverpod 3 移除了 AsyncValue.valueOrNull，这里补一个等价实现，
 /// 便于在 loading / error 状态下安全取值。
@@ -28,22 +29,22 @@ final discoveryProvider = FutureProvider<List<DaemonCandidate>>((ref) async {
 /// 陈旧文件（daemon 被强制结束后残留）指向的端口不会有响应，会被跳过，
 /// 从而不会挡住后面真正在运行的那个 daemon。
 ///
+/// 如果没有任何候选可用，会尝试自动拉起随客户端打包的本地 daemon
+/// （见 [DaemonLauncher]），成功后重新发现并连接——打开客户端即用，
+/// 无需用户手动分两步启动。
+///
 /// 连接成功后定期探活：daemon 重启会更换端口与 token，旧客户端的所有
 /// 认证请求都会失败，此时自动重新发现并重建客户端。
 /// 未连接时定期重试，daemon 稍后启动即可自动连上。
 final clientProvider = FutureProvider<DaemonClient?>((ref) async {
-  final candidates = await ref.watch(discoveryProvider.future);
+  var candidates = await ref.watch(discoveryProvider.future);
+  var found = await _probeCandidates(candidates);
 
-  DaemonClient? found;
-  for (final candidate in candidates) {
-    final probe = DaemonClient(candidate.info, connectTimeout: _probeTimeout);
-    final alive = await probe.ping();
-    probe.close();
-    if (!alive) continue;
-
-    // 探活用的客户端超时很短，确认存活后换成正常超时的客户端
-    found = DaemonClient(candidate.info);
-    break;
+  // daemon 未运行：尝试自动拉起，成功后重新读取发现文件并探活
+  if (found == null && await DaemonLauncher.ensureRunning()) {
+    ref.invalidate(discoveryProvider);
+    candidates = await ref.watch(discoveryProvider.future);
+    found = await _probeCandidates(candidates);
   }
 
   var disposed = false;
@@ -56,7 +57,8 @@ final clientProvider = FutureProvider<DaemonClient?>((ref) async {
 
   final client = found;
   if (client == null) {
-    // 没找到 daemon：定期重新发现，让稍后启动的 daemon 自动被连上
+    // 没找到 daemon：定期重新发现。DaemonLauncher 内部带退避地重试拉起，
+    // 这里只需触发重新发现即可。
     timer = Timer.periodic(_rediscoveryInterval, (_) {
       if (disposed) return;
       ref.invalidate(discoveryProvider);
@@ -83,6 +85,19 @@ final clientProvider = FutureProvider<DaemonClient?>((ref) async {
   return client;
 });
 
+/// 按优先级逐个探活候选位置，返回第一个真正有响应的客户端；都无响应时返回 null。
+Future<DaemonClient?> _probeCandidates(List<DaemonCandidate> candidates) async {
+  for (final candidate in candidates) {
+    final probe = DaemonClient(candidate.info, connectTimeout: _probeTimeout);
+    try {
+      if (await probe.ping()) return DaemonClient(candidate.info);
+    } finally {
+      probe.close();
+    }
+  }
+  return null;
+}
+
 /// 探活超时：只连回环地址，失败必须很快，否则逐个候选尝试会拖慢启动。
 const _probeTimeout = Duration(milliseconds: 800);
 
@@ -97,6 +112,36 @@ final daemonInfoProvider = FutureProvider<DaemonInfo?>((ref) async {
   final client = await ref.watch(clientProvider.future);
   return client?.info;
 });
+
+/// daemon 的全局配置项（日志级别、重连默认值），供「设置」页回显与编辑。
+class GlobalSettingsNotifier extends AsyncNotifier<GlobalSettings> {
+  @override
+  Future<GlobalSettings> build() async {
+    final client = await ref.watch(clientProvider.future);
+    if (client == null) {
+      throw StateError('未连接到 daemon');
+    }
+    return client.getGlobalSettings();
+  }
+
+  /// 保存全局配置；daemon 会重启套用新默认值的运行中隧道。
+  Future<void> save(GlobalSettings settings) async {
+    final client = await ref.read(clientProvider.future);
+    if (client == null) {
+      throw StateError('未连接到 daemon');
+    }
+    await client.updateGlobalSettings(settings);
+    // 重新读取回显（daemon 可能对输入做了归一化，如补齐默认值）
+    state = const AsyncLoading();
+    state = await AsyncValue.guard(client.getGlobalSettings);
+    // 隧道配置可能因全局默认值变化而重启，刷新列表让界面跟上
+    await ref.read(tunnelsProvider.notifier).refresh();
+  }
+}
+
+final globalSettingsProvider =
+    AsyncNotifierProvider<GlobalSettingsNotifier, GlobalSettings>(
+        GlobalSettingsNotifier.new);
 
 /// daemon 推送的事件流（状态变化、日志）。
 final eventStreamProvider = StreamProvider<Map<String, dynamic>>((ref) async* {

@@ -161,6 +161,28 @@ func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
 	writeOK(w)
 }
 
+// handleGetConfig 返回全局配置项，供客户端「设置」页回显。
+func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.app.GetGlobalSettings())
+}
+
+// handleUpdateConfig 更新全局配置项（日志级别、重连默认值）。
+//
+// 请求体只需包含要修改的字段；未提供的字段按零值处理并套用默认值。
+// 只改动顶层字段，不会触碰隧道 / SSH 连接。
+func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
+	var g config.GlobalSettings
+	if err := decodeJSON(w, r, &g); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := s.app.SetGlobalSettings(g); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeOK(w)
+}
+
 // maxRequestBody 是 API 请求体上限，防止异常客户端把内存吃满。
 const maxRequestBody = 1 << 20 // 1 MiB
 

@@ -1,5 +1,11 @@
 log_level = "info"
 
+# 全局重连默认值（可选）：未单独配置对应字段的隧道回退使用。
+# 也可以在客户端「设置」页里修改，不需要手改文件。
+# reconnect_strategy = "fixed"        # fixed（固定间隔）或 exponential（指数退避）
+# reconnect_interval = "5s"
+# max_reconnect_attempts = 0          # 0 表示无限重连
+
 # 可复用的 SSH 连接，供隧道通过 ssh_connection 引用。
 #
 # key_file 只记录本地文件路径，不复制、不上传。支持：
