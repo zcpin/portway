@@ -1,0 +1,42 @@
+log_level = "info"
+
+# 可复用的 SSH 连接，供隧道通过 ssh_connection 引用。
+#
+# key_file 只记录本地文件路径，不复制、不上传。支持：
+#   - 绝对路径：C:\Users\me\.ssh\id_ed25519 或 /home/me/.ssh/id_ed25519
+#   - ~ 开头：~/.ssh/id_ed25519（展开为用户主目录）
+#   - 环境变量：%USERPROFILE%\.ssh\id_ed25519（Windows）/ $HOME/.ssh/id_ed25519
+#   - 相对路径：依次在「配置文件目录」「可执行文件目录」「其下的 keys/」中查找
+[[ssh_connections]]
+name = "prod-server"
+host = "example.com:22"
+user = "root"
+key_file = "~/.ssh/id_ed25519"
+# 主机密钥校验（默认 known_hosts，用 ~/.ssh/known_hosts 校验）：
+#   known_hosts_file = "~/.ssh/known_hosts"  # 可选：指定其它 known_hosts 文件
+#   host_key_check = "insecure"             # 可信网络下可关闭校验
+# 目标主机不在 known_hosts 时，先执行：ssh-keyscan example.com >> ~/.ssh/known_hosts
+
+# 隧道：把远端 remote_host:remote_port 映射到本地 local_port
+[[tunnels]]
+name = "mysql-prod"
+ssh_connection = "prod-server"
+local_port = 13306
+remote_host = "127.0.0.1"
+remote_port = 3306
+reconnect_strategy = "fixed"      # fixed（固定间隔）或 exponential（指数退避）
+reconnect_interval = "5s"
+max_reconnect_attempts = 0        # 0 表示无限重连
+
+# 不使用 ssh_connection 时，也可以直接在隧道里写 SSH 信息（兼容旧配置）
+# [[tunnels]]
+# name = "redis-staging"
+# ssh_host = "staging.example.com:22"
+# ssh_user = "root"
+# key_file = "%USERPROFILE%\\.ssh\\id_ed25519"  # 也可用 ~ 或绝对路径
+# local_port = 16379
+# remote_host = "127.0.0.1"
+# remote_port = 6379
+# reconnect_strategy = "exponential"
+# reconnect_interval = "3s"
+# max_reconnect_attempts = 10

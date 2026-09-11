@@ -1,0 +1,30 @@
+# 构建产物
+.codegraph/
+daemon/bin/
+client/build/
+client/.dart_tool/
+
+# 本地配置与运行时文件
+daemon/keys/
+daemon/*.toml
+!daemon/ssh-tunnel.example.toml
+
+# 依赖
+client/.pub-cache/
+client/.packages
+client/.flutter-plugins
+client/.flutter-plugins-dependencies
+
+# 平台构建中间目录
+client/windows/flutter/ephemeral/
+client/macos/Flutter/ephemeral/
+client/linux/flutter/ephemeral/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# 系统
+.DS_Store
+Thumbs.db

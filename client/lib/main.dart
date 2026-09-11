@@ -1,0 +1,430 @@
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:window_manager/window_manager.dart';
+
+import 'models.dart';
+import 'providers.dart';
+import 'services/daemon_client.dart';
+import 'services/daemon_discovery.dart';
+import 'services/tray.dart';
+import 'pages/connections_page.dart';
+import 'pages/keys_page.dart';
+import 'pages/logs_page.dart';
+import 'pages/tunnels_page.dart';
+
+/// 强制本机回环请求不走系统代理。
+///
+/// 部分环境配置了全局 HTTP 代理，会拦截发往 127.0.0.1 的请求：
+/// REST 请求被转发到代理服务器，WebSocket 升级则会失败（HTTP 426）。
+/// daemon 只监听回环地址，因此这里统一绕过代理。
+class _DirectConnectionOverrides extends HttpOverrides {
+  @override
+  HttpClient createHttpClient(SecurityContext? context) {
+    final client = super.createHttpClient(context);
+    client.findProxy = (_) => 'DIRECT';
+    return client;
+  }
+}
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  HttpOverrides.global = _DirectConnectionOverrides();
+  await windowManager.ensureInitialized();
+
+  const windowOptions = WindowOptions(
+    size: Size(1180, 760),
+    minimumSize: Size(960, 640),
+    center: true,
+    title: 'SSH 隧道管理器',
+  );
+
+  await windowManager.waitUntilReadyToShow(windowOptions, () async {
+    await windowManager.show();
+    await windowManager.focus();
+  });
+
+  // 关闭窗口时收进托盘而不是退出，由 WindowListener 拦截关闭事件
+  await windowManager.setPreventClose(true);
+
+  runApp(const ProviderScope(child: SshTunnelApp()));
+}
+
+class SshTunnelApp extends StatelessWidget {
+  const SshTunnelApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'SSH 隧道管理器',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF3D7EFF),
+          brightness: Brightness.light,
+        ),
+      ),
+      darkTheme: ThemeData(
+        useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF3D7EFF),
+          brightness: Brightness.dark,
+        ),
+      ),
+      home: const HomeScreen(),
+    );
+  }
+}
+
+class HomeScreen extends ConsumerStatefulWidget {
+  const HomeScreen({super.key});
+
+  @override
+  ConsumerState<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends ConsumerState<HomeScreen> with WindowListener {
+  int _selected = 0;
+
+  late final AppTray _tray;
+
+  static const _destinations = [
+    (icon: Icons.swap_horiz_outlined, label: '隧道'),
+    (icon: Icons.dns_outlined, label: 'SSH 连接'),
+    (icon: Icons.key_outlined, label: '密钥'),
+    (icon: Icons.terminal_outlined, label: '日志'),
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    windowManager.addListener(this);
+
+    _tray = AppTray(
+      onShowWindow: _showWindow,
+      onQuit: _quit,
+    );
+    _tray.init();
+
+    // 首帧后再拉历史日志，避免拖慢启动
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(logsProvider.notifier).loadHistory();
+    });
+  }
+
+  @override
+  void dispose() {
+    windowManager.removeListener(this);
+    _tray.dispose();
+    super.dispose();
+  }
+
+  /// 关闭窗口时收进系统托盘，让程序继续在后台运行。
+  ///
+  /// 隧道由 daemon 维持，客户端窗口关掉不影响隧道；
+  /// 真正退出只能走关闭确认里的「退出程序」或托盘菜单的「退出」。
+  @override
+  void onWindowClose() async {
+    final minimize = await _confirmClose();
+    if (!minimize) return;
+
+    await windowManager.hide();
+    await _tray.init(); // 确保托盘图标仍在（可能被系统清理）
+  }
+
+  /// 询问用户是收进托盘还是退出，返回 true 表示收进托盘。
+  Future<bool> _confirmClose() async {
+    if (!mounted) return true;
+
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('关闭窗口'),
+        content: const Text(
+          '收进系统托盘后程序继续在后台运行，隧道不受影响。\n'
+          '选择「退出程序」则完全关闭客户端。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'cancel'),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'quit'),
+            child: const Text('退出程序'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, 'tray'),
+            child: const Text('收进托盘'),
+          ),
+        ],
+      ),
+    );
+
+    if (result == 'quit') {
+      await _quit();
+      return false;
+    }
+    return result == 'tray';
+  }
+
+  Future<void> _showWindow() async {
+    await windowManager.show();
+    await windowManager.focus();
+  }
+
+  /// 真正退出：先销毁托盘图标，再关闭窗口并结束进程。
+  Future<void> _quit() async {
+    await _tray.dispose();
+    await windowManager.setPreventClose(false);
+    await windowManager.destroy();
+    exit(0);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // 把 daemon 推送的事件分发到对应状态：状态变化更新隧道行，
+    // 日志追加进日志缓冲。
+    ref.listen(eventStreamProvider, (previous, next) {
+      next.whenData((event) {
+        switch (event['type']) {
+          case 'status':
+            final status = event['status'];
+            if (status is Map) {
+              ref
+                  .read(tunnelsProvider.notifier)
+                  .applyStatus(status.cast<String, dynamic>());
+            }
+          case 'log':
+            final log = event['log'];
+            if (log is Map) {
+              ref
+                  .read(logsProvider.notifier)
+                  .add(LogEntry.fromJson(log.cast<String, dynamic>()));
+            }
+        }
+      });
+    });
+
+    // 让托盘菜单反映当前运行中的隧道数量
+    ref.listen(tunnelsProvider, (_, next) {
+      _tray.updateStatus(
+        runningCount: next.valueOrNull?.where((t) => t.isRunning).length,
+      );
+    });
+
+    final connection = ref.watch(clientProvider);
+
+    return Scaffold(
+      body: Row(
+        children: [
+          NavigationRail(
+            selectedIndex: _selected,
+            onDestinationSelected: (i) => setState(() => _selected = i),
+            labelType: NavigationRailLabelType.all,
+            destinations: [
+              for (final d in _destinations)
+                NavigationRailDestination(
+                  icon: Icon(d.icon),
+                  label: Text(d.label),
+                ),
+            ],
+          ),
+          const VerticalDivider(width: 1),
+          Expanded(
+            child: Column(
+              children: [
+                _ConnectionBanner(state: connection),
+                Expanded(
+                  child: connection.when(
+                    loading: () =>
+                        const Center(child: CircularProgressIndicator()),
+                    error: (e, _) => _DaemonMissing(message: e.toString()),
+                    data: (client) {
+                      if (client == null) {
+                        return const _DaemonMissing();
+                      }
+                      return IndexedStack(
+                        index: _selected,
+                        children: const [
+                          TunnelsPage(),
+                          ConnectionsPage(),
+                          KeysPage(),
+                          LogsPage(),
+                        ],
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 顶部连接状态条。
+class _ConnectionBanner extends ConsumerWidget {
+  const _ConnectionBanner({required this.state});
+
+  final AsyncValue<DaemonClient?> state;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+
+    late final String text;
+    late final Color color;
+
+    state.when(
+      loading: () {
+        text = '正在连接 daemon...';
+        color = theme.colorScheme.tertiary;
+      },
+      error: (_, _) {
+        text = 'daemon 未运行';
+        color = theme.colorScheme.error;
+      },
+      data: (client) {
+        if (client == null) {
+          text = 'daemon 未运行';
+          color = theme.colorScheme.error;
+        } else {
+          final info = client.info;
+          text =
+              '已连接 ${info.httpBase} · ${info.sourceLabel}（版本 ${info.version}）';
+          color = const Color(0xFF2E9E5B);
+        }
+      },
+    );
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+      color: color.withValues(alpha: 0.12),
+      child: Row(
+        children: [
+          Icon(Icons.circle, size: 10, color: color),
+          const SizedBox(width: 10),
+          Text(text, style: theme.textTheme.bodyMedium?.copyWith(color: color)),
+          const Spacer(),
+          TextButton.icon(
+            onPressed: () {
+              // 重新读取发现文件并重新探活；其余数据状态随之级联刷新
+              ref.invalidate(discoveryProvider);
+              ref.invalidate(tunnelsProvider);
+              ref.invalidate(sshConnectionsProvider);
+              ref.invalidate(keysProvider);
+            },
+            icon: const Icon(Icons.refresh, size: 16),
+            label: const Text('重新连接'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// daemon 未启动时的引导页。
+class _DaemonMissing extends ConsumerWidget {
+  const _DaemonMissing({this.message});
+
+  final String? message;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final found =
+        ref.watch(discoveryProvider).valueOrNull ?? const <DaemonCandidate>[];
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 620),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.power_off,
+                        color: theme.colorScheme.error, size: 28),
+                    const SizedBox(width: 12),
+                    Text('未检测到运行中的 daemon',
+                        style: theme.textTheme.titleLarge),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                const Text('请先启动本地守护进程，客户端会自动发现并连接它：'),
+                const SizedBox(height: 12),
+                const _CodeBlock(
+                  'cd daemon\n'
+                  'go build -o bin/ssh-tunnel-daemon.exe ./cmd/ssh-tunnel\n'
+                  'bin/ssh-tunnel-daemon.exe -config ssh-tunnel.toml',
+                ),
+                const SizedBox(height: 16),
+                Text('客户端会依次检查以下位置（按优先级）：',
+                    style: theme.textTheme.bodySmall),
+                const SizedBox(height: 6),
+                for (final path in DaemonDiscovery.candidatePaths)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 2),
+                    child: Text(
+                      '· $path',
+                      style: theme.textTheme.bodySmall
+                          ?.copyWith(fontFamily: 'monospace'),
+                    ),
+                  ),
+                if (found.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    '已找到 ${found.length} 个发现文件，但均无响应：'
+                    '${found.map((c) => c.info.sourceLabel).join('、')}。'
+                    '可能是 daemon 已被强制结束而文件未清理，或端口处于异常状态。',
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(color: theme.colorScheme.error),
+                  ),
+                ],
+                if (message != null) ...[
+                  const SizedBox(height: 8),
+                  Text(message!,
+                      style: theme.textTheme.bodySmall
+                          ?.copyWith(color: theme.colorScheme.error)),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CodeBlock extends StatelessWidget {
+  const _CodeBlock(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: SelectableText(
+        text,
+        style: theme.textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
+      ),
+    );
+  }
+}
