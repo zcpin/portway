@@ -21,6 +21,7 @@ const (
 	// defaultKeepAliveInterval 是 keepalive 探测间隔，用于发现 NAT 超时、
 	// 对端崩溃等不会主动通知本端的失效连接
 	defaultKeepAliveInterval = 30 * time.Second
+	defaultKeepAliveTimeout  = 30 * time.Second
 )
 
 // sshConn 是隧道对 SSH 连接的最小依赖，便于测试中替换。
@@ -48,8 +49,11 @@ type Tunnel struct {
 
 	// dial 建立 SSH 连接，默认走 createSSHConnection，测试可替换
 	dial func(ctx context.Context) (sshConn, error)
+	// connectTimeout 覆盖 TCP 拨号与 SSH 握手的总时长。
+	connectTimeout time.Duration
 	// keepAliveInterval 为 keepalive 探测间隔
 	keepAliveInterval time.Duration
+	keepAliveTimeout  time.Duration
 }
 
 // NewTunnel creates a new tunnel with the given configuration
@@ -62,7 +66,9 @@ func NewTunnel(cfg config.ParsedTunnel) (*Tunnel, error) {
 	t := &Tunnel{
 		config:            cfg,
 		strategy:          strategy,
+		connectTimeout:    sshConnectTimeout,
 		keepAliveInterval: defaultKeepAliveInterval,
+		keepAliveTimeout:  defaultKeepAliveTimeout,
 	}
 	t.dial = t.createSSHConnection
 	return t, nil
@@ -78,6 +84,7 @@ func (t *Tunnel) Start() error {
 	// ctx/cancel/wg 都必须在锁内完成：Stop 会在锁内捕获它们
 	ctx, cancel := context.WithCancel(context.Background())
 	t.ctx, t.cancel = ctx, cancel
+	t.sshClient, t.forwarder = nil, nil
 	t.wg = &sync.WaitGroup{}
 	t.wg.Add(1)
 	wg := t.wg
@@ -110,14 +117,12 @@ func (t *Tunnel) Stop() {
 		cancel()
 	}
 
-	// Stop forwarder if running
-	if forwarder != nil {
-		forwarder.Stop()
-	}
-
-	// Close SSH client
+	// 先关闭 SSH transport，解除正在进行的通道拨号和读写，再等待转发退出。
 	if sshClient != nil {
 		sshClient.Close()
+	}
+	if forwarder != nil {
+		forwarder.Stop()
 	}
 
 	// 只等待本次 Start 对应的 run，不干扰后续 Start
@@ -137,7 +142,16 @@ func (t *Tunnel) IsRunning() bool {
 // run is the main tunnel loop：连接 — 维持 — 掉线后按策略重连。
 // attempt 是本次运行的局部状态，不与后续 Start 的 run 共享。
 func (t *Tunnel) run(ctx context.Context, wg *sync.WaitGroup) {
-	defer wg.Done()
+	defer func() {
+		t.mu.Lock()
+		// 旧的 Stop 尚未返回时可能已再次 Start，只结束当前这一批运行。
+		if t.ctx == ctx {
+			t.isRunning = false
+			t.sshClient, t.forwarder = nil, nil
+		}
+		t.mu.Unlock()
+		wg.Done()
+	}()
 
 	attempt := 0
 	for {
@@ -193,12 +207,6 @@ func (t *Tunnel) connectAndForward(ctx context.Context) (bool, error) {
 		return false, err
 	}
 
-	t.mu.Lock()
-	t.sshClient = client
-	t.mu.Unlock()
-
-	logger.Info("[%s] SSH connection established", t.config.Name)
-
 	// Create and start forwarder
 	forwarder := NewForwarder(
 		t.config.Name,
@@ -209,23 +217,30 @@ func (t *Tunnel) connectAndForward(ctx context.Context) (bool, error) {
 		client,
 	)
 
-	// 先登记再启动：否则并发的 Stop 可能看不到这个 forwarder，导致监听泄漏
+	// 同时登记连接与转发器；已取消的旧拨号不能覆盖新一次 Start 的资源。
 	t.mu.Lock()
+	if t.ctx != ctx || ctx.Err() != nil {
+		t.mu.Unlock()
+		client.Close()
+		return false, context.Canceled
+	}
+	t.sshClient = client
 	t.forwarder = forwarder
 	t.mu.Unlock()
 
-	if err := forwarder.Start(); err != nil {
+	defer func() {
 		client.Close()
+		forwarder.Stop()
+	}()
+
+	logger.Info("[%s] SSH connection established", t.config.Name)
+
+	if err := forwarder.Start(); err != nil {
 		return false, fmt.Errorf("failed to start forwarder: %w", err)
 	}
 
 	established := true
 	runErr := error(nil)
-
-	defer func() {
-		forwarder.Stop()
-		client.Close()
-	}()
 
 	// keepalive 探测：失败即关闭连接，让下面的 select 立刻醒过来触发重连
 	keepAliveCtx, cancelKeepAlive := context.WithCancel(ctx)
@@ -261,6 +276,10 @@ func (t *Tunnel) keepAlive(ctx context.Context, client sshConn) {
 	if interval <= 0 {
 		interval = defaultKeepAliveInterval
 	}
+	timeout := t.keepAliveTimeout
+	if timeout <= 0 {
+		timeout = defaultKeepAliveTimeout
+	}
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -270,7 +289,24 @@ func (t *Tunnel) keepAlive(ctx context.Context, client sshConn) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if _, _, err := client.SendRequest("keepalive@openssh.com", true, nil); err != nil {
+			result := make(chan error, 1)
+			go func() {
+				_, _, err := client.SendRequest("keepalive@openssh.com", true, nil)
+				result <- err
+			}()
+			timer := time.NewTimer(timeout)
+			var err error
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				client.Close()
+				return
+			case <-timer.C:
+				err = context.DeadlineExceeded
+			case err = <-result:
+				timer.Stop()
+			}
+			if err != nil {
 				logger.Debug("[%s] SSH keepalive failed, closing connection: %v", t.config.Name, err)
 				client.Close()
 				return
@@ -311,28 +347,34 @@ func (t *Tunnel) createSSHConnection(ctx context.Context) (sshConn, error) {
 		Timeout:         sshConnectTimeout,
 	}
 
-	// Connect to SSH server
-	dialer := &net.Dialer{Timeout: sshConnectTimeout}
-	netConn, err := dialer.DialContext(ctx, "tcp", t.config.SSHHost)
+	// 同一个超时覆盖 TCP 拨号与 SSH 握手，取消时关闭底层连接解除阻塞。
+	timeout := t.connectTimeout
+	if timeout <= 0 {
+		timeout = sshConnectTimeout
+	}
+	connectCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	dialer := &net.Dialer{}
+	netConn, err := dialer.DialContext(connectCtx, "tcp", t.config.SSHHost)
 	if err != nil {
 		return nil, fmt.Errorf("failed to dial %s: %w", t.config.SSHHost, err)
 	}
 
-	// ctx 取消时关闭底层连接以中断握手；握手结束后 goroutine 立即退出
-	handshakeDone := make(chan struct{})
-	go func() {
-		select {
-		case <-ctx.Done():
-			netConn.Close()
-		case <-handshakeDone:
-		}
-	}()
+	stopClose := context.AfterFunc(connectCtx, func() { netConn.Close() })
+	defer stopClose()
 
 	conn, chans, reqs, err := ssh.NewClientConn(netConn, t.config.SSHHost, sshConfig)
-	close(handshakeDone)
 	if err != nil {
 		netConn.Close()
+		if connectCtx.Err() != nil {
+			err = connectCtx.Err()
+		}
 		return nil, fmt.Errorf("failed to establish SSH connection to %s: %w", t.config.SSHHost, err)
+	}
+	// 握手完成后撤销超时关闭，避免正常会话在握手时限到达后被断开。
+	if !stopClose() {
+		conn.Close()
+		return nil, fmt.Errorf("SSH handshake cancelled: %w", connectCtx.Err())
 	}
 
 	return ssh.NewClient(conn, chans, reqs), nil

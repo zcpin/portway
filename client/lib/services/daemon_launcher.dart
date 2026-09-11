@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -22,10 +21,6 @@ class DaemonLauncher {
   /// daemon 可执行文件名。
   static final String _exeName =
       Platform.isWindows ? 'ssh-tunnel-daemon.exe' : 'ssh-tunnel-daemon';
-
-  /// 已拉起的 daemon 进程句柄。仅用于防止被垃圾回收；
-  /// daemon 独立常驻，客户端退出不影响它。
-  static final List<Process> _running = <Process>[];
 
   /// 本会话内是否已经发起过拉起，避免创建重复进程。
   static bool _launchAttempted = false;
@@ -89,15 +84,13 @@ class DaemonLauncher {
     _lastLaunchAt = now;
 
     try {
-      final process = await Process.start(
+      // detached 不创建需要客户端消费的 stdout/stderr 管道，
+      // daemon 的日志输出与生命周期都不再依赖客户端。
+      await Process.start(
         path,
         const ['-hide-console'],
-        mode: ProcessStartMode.normal,
+        mode: ProcessStartMode.detached,
       );
-      // 保存引用避免被回收；不 await，daemon 需要独立常驻，
-      // 客户端退出后它仍要继续维持隧道。
-      _running.add(process);
-      unawaited(process.exitCode.then((_) => _running.remove(process)));
     } catch (e) {
       debugPrint('拉起本地 daemon 失败: $e');
       return false;

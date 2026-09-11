@@ -5,6 +5,12 @@
 #ifndef AppVersion
   #define AppVersion "1.0.0"
 #endif
+#ifndef AppBuildName
+  #define AppBuildName AppVersion
+#endif
+#ifndef AppBuildNumber
+  #define AppBuildNumber "1"
+#endif
 
 #define MyAppName "SSH 隧道管理器"
 #define MyAppExe "ssh_tunnel_client.exe"
@@ -15,6 +21,7 @@
 AppId={{D5E9C2A4-7B31-4F0D-9A6E-3C8B5D1A7F20}
 AppName={#MyAppName}
 AppVersion={#AppVersion}
+VersionInfoVersion={#AppBuildName}.{#AppBuildNumber}
 AppPublisher=byteporter
 DefaultDirName={localappdata}\Programs\SSH Tunnel Manager
 DefaultGroupName={#MyAppName}

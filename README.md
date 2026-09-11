@@ -253,7 +253,7 @@ daemon **只监听回环地址**，并且：
 - 刻意**不设置 CORS 响应头**——浏览器中的恶意页面无法跨域访问本服务，而原生客户端不受同源策略限制
 - 私钥只记录路径、不复制文件，daemon 按运行身份读取，因此私钥权限需对 daemon 的运行身份开放
 - SSH 主机密钥默认按 `~/.ssh/known_hosts` 校验；可在 `ssh_connections`（或直连配置的 `tunnels`）上设置 `host_key_check = "insecure"` 关闭校验，或用 `known_hosts_file` 指定其它文件
-- 隧道建立后每 30 秒发送一次 SSH keepalive，探测 NAT 超时、对端崩溃等僵死连接；掉线后按 `reconnect_strategy` 自动重连
+- TCP 拨号与 SSH 握手共用 30 秒超时；隧道建立后每 30 秒发送一次 SSH keepalive，单次响应最多等待 30 秒，超时后关闭连接并按 `reconnect_strategy` 自动重连
 
 ## 开发
 
@@ -271,7 +271,11 @@ dart analyze
 flutter test
 ```
 
-每次 push / PR 会由 `.github/workflows/ci.yml` 执行以上检查（Go 侧含 `gofmt` 校验与 `-race` 测试）。
+每次 push / PR 会由 `.github/workflows/ci.yml` 执行以上检查（Go 侧含 `gofmt` 校验与 `-race` 测试），以及发布版本解析脚本的测试。脚本测试也可在仓库根目录运行：
+
+```powershell
+pwsh -NoProfile -File scripts/test_release_version.ps1
+```
 
 ## 打包安装包（Windows）
 
@@ -288,6 +292,8 @@ scripts/build_windows.bat [版本号]
 
 步骤：`flutter build windows --release` → `go build` 并把 daemon 拷入客户端发布目录（同目录是客户端自动拉起 daemon 的前提）→ 复制示例配置 → Inno Setup 打包 → 压缩便携 zip。
 
+版本参数同时写入客户端、daemon 和安装包。本地构建默认使用构建号 `1`；CI 通过额外的 `[build-name] [build-number]` 参数传入数字版本及运行序号。缺少 Inno Setup 时只跳过安装包，仍然生成便携 ZIP。
+
 前置条件：
 
 - Flutter / Go / VS Build Tools 在 PATH
@@ -303,6 +309,10 @@ git tag v1.2.3
 git push origin v1.2.3
 ```
 
+发布构建先复用 CI，通过 Go、Flutter 和发布脚本检查后再打包。CI 与发布使用固定的 Flutter `3.44.9`。
+
+标签必须是 `v` 开头的语义版本（例如 `v1.2.3` 或 `v1.2.3-rc.1`）。手动从分支构建时，产物版本为 `ci-<运行序号>`，客户端数字版本取自 `client/pubspec.yaml`；标签构建则取标签中的数字版本。客户端与安装包的构建号统一使用 GitHub Actions 运行序号。
+
 各平台产物：
 
 | 平台 | 产物 |
@@ -313,6 +323,8 @@ git push origin v1.2.3
 
 > macOS 为 ad-hoc 签名、未公证，分发给其它 Mac 首次需右键「打开」绕过 Gatekeeper；
 > 正式分发建议补上 Developer ID 签名与 notarization。
+
+Linux 便携版需要系统提供 GTK 3 与 Ayatana AppIndicator（或 AppIndicator）运行库；发布工作流会显式安装对应的开发依赖。
 
 安装程序为**按用户安装**（无需管理员权限），安装到
 `%LOCALAPPDATA%\Programs\SSH Tunnel Manager`，创建开始菜单与桌面快捷方式。

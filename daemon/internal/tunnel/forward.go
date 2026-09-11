@@ -5,7 +5,6 @@ import (
 	"io"
 	"net"
 	"sync"
-	"time"
 
 	"github.com/byteporter/ssh-tunnel/internal/logger"
 )
@@ -22,8 +21,9 @@ type Forwarder struct {
 	wg       sync.WaitGroup
 	stopOnce sync.Once
 
-	mu    sync.Mutex
-	conns []net.Conn
+	mu       sync.Mutex
+	listener net.Listener
+	conns    []net.Conn
 }
 
 func NewForwarder(tunnelName, localHost, localPort, remoteHost, remotePort string, sshClient sshConn) *Forwarder {
@@ -60,6 +60,7 @@ func (f *Forwarder) Start() error {
 		return nil
 	default:
 	}
+	f.listener = listener
 	f.wg.Add(1)
 	f.mu.Unlock()
 
@@ -75,43 +76,30 @@ func (f *Forwarder) acceptConnections(listener net.Listener) {
 	defer listener.Close()
 
 	for {
-		select {
-		case <-f.stopChan:
-			logger.Debug("[%s] Stopping listener", f.tunnelName)
-			return
-		default:
-			connCh := make(chan net.Conn, 1)
-			errCh := make(chan error, 1)
-
-			go func() {
-				conn, err := listener.Accept()
-				if err != nil {
-					errCh <- err
-				} else {
-					connCh <- conn
-				}
-			}()
-
+		conn, err := listener.Accept()
+		if err != nil {
 			select {
 			case <-f.stopChan:
-				return
-			case conn := <-connCh:
-				f.wg.Add(1)
-				go f.handleConnection(conn)
-			case err := <-errCh:
-				if err != io.EOF {
-					logger.Debug("[%s] Accept error: %v", f.tunnelName, err)
-				}
-				return
+			default:
+				logger.Debug("[%s] Accept error: %v", f.tunnelName, err)
 			}
+			return
 		}
+		f.wg.Add(1)
+		go f.handleConnection(conn)
 	}
 }
 
-func (f *Forwarder) trackConn(conn net.Conn) {
+func (f *Forwarder) trackConn(conn net.Conn) bool {
 	f.mu.Lock()
+	defer f.mu.Unlock()
+	select {
+	case <-f.stopChan:
+		return false
+	default:
+	}
 	f.conns = append(f.conns, conn)
-	f.mu.Unlock()
+	return true
 }
 
 func (f *Forwarder) untrackConn(conn net.Conn) {
@@ -129,7 +117,9 @@ func (f *Forwarder) handleConnection(localConn net.Conn) {
 	defer f.wg.Done()
 	defer localConn.Close()
 
-	f.trackConn(localConn)
+	if !f.trackConn(localConn) {
+		return
+	}
 	defer f.untrackConn(localConn)
 
 	remoteConn, err := f.sshClient.Dial("tcp", f.remoteAddr)
@@ -139,7 +129,9 @@ func (f *Forwarder) handleConnection(localConn net.Conn) {
 	}
 	defer remoteConn.Close()
 
-	f.trackConn(remoteConn)
+	if !f.trackConn(remoteConn) {
+		return
+	}
 	defer f.untrackConn(remoteConn)
 
 	logger.Debug("[%s] New connection from %s", f.tunnelName, localConn.RemoteAddr())
@@ -159,44 +151,29 @@ func (f *Forwarder) handleConnection(localConn net.Conn) {
 }
 
 func (f *Forwarder) copyData(src, dst net.Conn, direction string) {
-	buf := make([]byte, 32*1024)
-
-	for {
-		select {
-		case <-f.stopChan:
-			return
-		default:
-			src.SetReadDeadline(time.Now().Add(1 * time.Second))
-
-			n, err := src.Read(buf)
-			if err != nil {
-				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-					continue
-				}
-				return
-			}
-
-			if n > 0 {
-				if _, err := dst.Write(buf[:n]); err != nil {
-					return
-				}
-			}
-		}
-	}
+	// io.Copy 先转发 n > 0 的数据，再处理同次 Read 返回的 EOF/错误。
+	// Stop 通过关闭已登记的连接解除阻塞，无需轮询读超时。
+	_, _ = io.Copy(dst, src)
 }
 
 func (f *Forwarder) Stop() {
 	f.stopOnce.Do(func() {
+		f.mu.Lock()
 		close(f.stopChan)
+		listener := f.listener
+		conns := f.conns
+		f.conns = nil
+		f.mu.Unlock()
+
+		if listener != nil {
+			listener.Close()
+		}
+		for _, c := range conns {
+			c.Close()
+		}
 	})
 
-	f.mu.Lock()
-	for _, c := range f.conns {
-		c.Close()
-	}
-	f.conns = nil
-	f.mu.Unlock()
-
 	f.wg.Wait()
+	f.doneOnce.Do(func() { close(f.done) })
 	logger.Debug("[%s] Forwarder stopped", f.tunnelName)
 }
