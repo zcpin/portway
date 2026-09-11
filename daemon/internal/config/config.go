@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/byteporter/ssh-tunnel/internal/logger"
 )
 
 // Config represents the main configuration structure
@@ -130,6 +131,12 @@ func Load(configPath string) (*Config, error) {
 
 // Validate validates the configuration
 func (c *Config) Validate() error {
+	if strings.TrimSpace(c.LogLevel) == "" {
+		c.LogLevel = "info"
+	}
+	if _, err := logger.ParseLevel(c.LogLevel); err != nil {
+		return err
+	}
 	// 全局重连默认值：先校验并补齐，单个隧道未配置对应字段时回退使用。
 	if strings.TrimSpace(c.ReconnectStrategy) == "" {
 		c.ReconnectStrategy = "fixed"
@@ -155,8 +162,14 @@ func (c *Config) Validate() error {
 		if conn.Name == "" {
 			return fmt.Errorf("SSH connection: name is required")
 		}
+		if _, exists := sshConnMap[conn.Name]; exists {
+			return fmt.Errorf("SSH connection name %q is duplicated", conn.Name)
+		}
 		if conn.Host == "" {
 			return fmt.Errorf("SSH connection %s: host is required", conn.Name)
+		}
+		if _, err := normalizeSSHHost(conn.Host); err != nil {
+			return fmt.Errorf("SSH connection %s: invalid host: %w", conn.Name, err)
 		}
 		if conn.User == "" {
 			return fmt.Errorf("SSH connection %s: user is required", conn.Name)
@@ -172,6 +185,7 @@ func (c *Config) Validate() error {
 
 	// Check for duplicate local ports
 	localPorts := make(map[int]bool)
+	tunnelNames := make(map[string]bool)
 	// 注意用下标取指针：默认值必须写回 c.Tunnels，只改 range 的副本会被丢弃，
 	// 导致 ParseTunnels 拿到空字符串的 reconnect_interval。
 	for i := range c.Tunnels {
@@ -179,14 +193,24 @@ func (c *Config) Validate() error {
 		if tunnel.Name == "" {
 			return fmt.Errorf("tunnel %d: name is required", i)
 		}
+		if tunnelNames[tunnel.Name] {
+			return fmt.Errorf("tunnel name %q is duplicated", tunnel.Name)
+		}
+		tunnelNames[tunnel.Name] = true
 		if tunnel.LocalPort == 0 {
 			return fmt.Errorf("tunnel %s: local_port is required", tunnel.Name)
+		}
+		if tunnel.LocalPort < 1 || tunnel.LocalPort > 65535 {
+			return fmt.Errorf("tunnel %s: local_port must be between 1 and 65535", tunnel.Name)
 		}
 		if tunnel.RemoteHost == "" {
 			return fmt.Errorf("tunnel %s: remote_host is required", tunnel.Name)
 		}
 		if tunnel.RemotePort == 0 {
 			return fmt.Errorf("tunnel %s: remote_port is required", tunnel.Name)
+		}
+		if tunnel.RemotePort < 1 || tunnel.RemotePort > 65535 {
+			return fmt.Errorf("tunnel %s: remote_port must be between 1 and 65535", tunnel.Name)
 		}
 
 		// Validate SSH configuration (either connection reference or direct config)
@@ -234,6 +258,9 @@ func (c *Config) Validate() error {
 		}
 
 		// 最大重试次数回退到全局值；0 表示无限重试
+		if tunnel.MaxReconnectAttempts < 0 {
+			return fmt.Errorf("tunnel %s: max_reconnect_attempts must be >= 0", tunnel.Name)
+		}
 		if tunnel.MaxReconnectAttempts == 0 {
 			tunnel.MaxReconnectAttempts = c.MaxReconnectAttempts
 		}

@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/byteporter/ssh-tunnel/internal/logger"
 	"github.com/coder/websocket"
 )
 
@@ -37,6 +39,38 @@ func dialHub(t *testing.T) (*Hub, *websocket.Conn) {
 		t.Fatalf("连接数 = %d，期望 1", hub.ClientCount())
 	}
 	return hub, conn
+}
+
+func TestSlowClientLogDoesNotReenterFullQueue(t *testing.T) {
+	_, peer := dialHub(t)
+	hub := NewHub()
+	c := &client{conn: peer, send: make(chan []byte, 1), done: make(chan struct{})}
+	c.send <- []byte("already full")
+	hub.add(c)
+	var calls atomic.Int32
+	logger.GetGlobalLogger().SetLevel(logger.DEBUG)
+	logger.SetGlobalLogHook(func(level, message string) {
+		if message != "websocket client too slow, dropping connection" {
+			return
+		}
+		if calls.Add(1) >= 4 {
+			// 限制失败时的递归深度，避免回归测试本身耗尽栈空间。
+			hub.remove(c)
+			return
+		}
+		hub.Emit("log", map[string]string{"level": level, "message": message})
+	})
+	t.Cleanup(func() {
+		logger.SetGlobalLogHook(nil)
+		logger.GetGlobalLogger().SetLevel(logger.INFO)
+	})
+	hub.Emit("status", map[string]bool{"tunnel": true})
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("慢客户端日志重复进入了满队列: %d 次", got)
+	}
+	if hub.ClientCount() != 0 {
+		t.Fatal("慢客户端未移除")
+	}
 }
 
 func TestHubEmitDeliversEvent(t *testing.T) {

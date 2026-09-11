@@ -71,9 +71,10 @@ func (h *Hub) Emit(event string, data interface{}) {
 			// 慢客户端：断开而不是阻塞广播。
 			// 用 CloseNow 立即断开：Close 会等待关闭握手（最长 5 秒），
 			// 那会把 Emit 的调用方重新拖住
-			logger.Debug("websocket client too slow, dropping connection")
 			h.remove(c)
 			_ = c.conn.CloseNow()
+			// 日志钩子会再次调用 Emit，必须先移除满队列的连接。
+			logger.Debug("websocket client too slow, dropping connection")
 		}
 	}
 }
@@ -152,9 +153,9 @@ func (h *Hub) writeLoop(c *client) {
 			err := c.conn.Write(ctx, websocket.MessageText, payload)
 			cancel()
 			if err != nil {
-				logger.Debug("websocket write failed, connection removed: %v", err)
 				h.remove(c)
 				_ = c.conn.CloseNow()
+				logger.Debug("websocket write failed, connection removed: %v", err)
 				return
 			}
 		}

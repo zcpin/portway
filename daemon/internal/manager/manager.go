@@ -16,6 +16,7 @@ type Manager struct {
 	configIO   *config.ConfigIO
 	configPath string
 	mu         sync.RWMutex
+	updateMu   sync.Mutex // 串行化配置提交及其运行状态、日志级别的应用。
 	stopOnce   sync.Once
 	running    bool
 }
@@ -177,10 +178,24 @@ func (m *Manager) GetGlobalSettings() config.GlobalSettings {
 // 重载会让未显式配置重连字段的隧道立刻套用新默认值（其运行状态会随之
 // 停止再启动）；显式配置了自己的重连字段的隧道不受影响。
 func (m *Manager) SetGlobalSettings(s config.GlobalSettings) error {
+	m.updateMu.Lock()
+	defer m.updateMu.Unlock()
 	if err := m.configIO.SetGlobalSettings(s); err != nil {
 		return err
 	}
-	return m.reloadInternal()
+	if err := m.reloadInternal(); err != nil {
+		return err
+	}
+	return m.applyLogLevel()
+}
+
+func (m *Manager) applyLogLevel() error {
+	level, err := logger.ParseLevel(m.configIO.GlobalSettings().LogLevel)
+	if err != nil {
+		return err
+	}
+	logger.GetGlobalLogger().SetLevel(level)
+	return nil
 }
 
 // GetSSHConnections returns all SSH connections
@@ -190,6 +205,8 @@ func (m *Manager) GetSSHConnections() []config.SSHConnection {
 
 // AddSSHConnection adds a new SSH connection
 func (m *Manager) AddSSHConnection(conn config.SSHConnection) error {
+	m.updateMu.Lock()
+	defer m.updateMu.Unlock()
 	if err := m.configIO.AddSSHConnection(conn); err != nil {
 		return err
 	}
@@ -198,6 +215,8 @@ func (m *Manager) AddSSHConnection(conn config.SSHConnection) error {
 
 // UpdateSSHConnection updates an SSH connection
 func (m *Manager) UpdateSSHConnection(name string, conn config.SSHConnection) error {
+	m.updateMu.Lock()
+	defer m.updateMu.Unlock()
 	if err := m.configIO.UpdateSSHConnection(name, conn); err != nil {
 		return err
 	}
@@ -206,6 +225,8 @@ func (m *Manager) UpdateSSHConnection(name string, conn config.SSHConnection) er
 
 // DeleteSSHConnection deletes an SSH connection
 func (m *Manager) DeleteSSHConnection(name string) error {
+	m.updateMu.Lock()
+	defer m.updateMu.Unlock()
 	if err := m.configIO.DeleteSSHConnection(name); err != nil {
 		return err
 	}
@@ -214,6 +235,8 @@ func (m *Manager) DeleteSSHConnection(name string) error {
 
 // AddTunnel adds a new tunnel
 func (m *Manager) AddTunnel(tunnel config.Tunnel) error {
+	m.updateMu.Lock()
+	defer m.updateMu.Unlock()
 	if err := m.configIO.AddTunnel(tunnel); err != nil {
 		return err
 	}
@@ -224,6 +247,8 @@ func (m *Manager) AddTunnel(tunnel config.Tunnel) error {
 
 // UpdateTunnel updates an existing tunnel
 func (m *Manager) UpdateTunnel(name string, tunnel config.Tunnel) error {
+	m.updateMu.Lock()
+	defer m.updateMu.Unlock()
 	if err := m.configIO.UpdateTunnel(name, tunnel); err != nil {
 		return err
 	}
@@ -234,15 +259,9 @@ func (m *Manager) UpdateTunnel(name string, tunnel config.Tunnel) error {
 
 // DeleteTunnel deletes a tunnel
 func (m *Manager) DeleteTunnel(name string) error {
-	// Stop the tunnel first if running
-	m.mu.RLock()
-	tun, exists := m.tunnels[name]
-	m.mu.RUnlock()
-
-	if exists && tun.IsRunning() {
-		tun.Stop()
-	}
-
+	m.updateMu.Lock()
+	defer m.updateMu.Unlock()
+	// 保存成功后由 reloadInternal 停止已移除的隧道。
 	if err := m.configIO.DeleteTunnel(name); err != nil {
 		return err
 	}
@@ -336,6 +355,8 @@ func (m *Manager) reloadInternal() error {
 
 // Reload reloads the configuration from disk and applies it to the tunnels.
 func (m *Manager) Reload(configPath string) error {
+	m.updateMu.Lock()
+	defer m.updateMu.Unlock()
 	logger.Info("Reloading configuration from %s...", configPath)
 
 	// Load new configuration
@@ -344,14 +365,15 @@ func (m *Manager) Reload(configPath string) error {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
 
-	if err := newConfig.Validate(); err != nil {
-		return fmt.Errorf("invalid configuration: %w", err)
+	// 同步进 ConfigIO，否则后续 GetConfig 以及由此驱动的隧道重载仍是旧配置
+	if err := m.configIO.Replace(newConfig); err != nil {
+		return err
 	}
 
-	// 同步进 ConfigIO，否则后续 GetConfig 以及由此驱动的隧道重载仍是旧配置
-	m.configIO.Replace(newConfig)
-
 	if err := m.reloadInternal(); err != nil {
+		return err
+	}
+	if err := m.applyLogLevel(); err != nil {
 		return err
 	}
 

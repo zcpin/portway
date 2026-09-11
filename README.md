@@ -182,6 +182,7 @@ ssh-keyscan example.com >> ~/.ssh/known_hosts
   - 关闭窗口行为的默认动作（客户端本地偏好，存于 `~/.ssh-tunnel/client_settings.json`）
   - 隧道重连的**全局默认值**（重连策略 / 间隔 / 最大次数 / 日志级别），写入 daemon 配置，
     未单独配置这些字段的隧道回退使用；保存后受影响的运行中隧道会重启以应用新配置
+  - 日志级别在保存或重新加载配置成功后立即生效；无效写入请求会在保存前被拒绝，写盘失败会保留原配置和运行状态
 - **关于**：程序简介、快速上手步骤、GitHub 仓库地址
 
 ## 命令行
@@ -200,7 +201,7 @@ ssh-tunnel-daemon service <动作>       系统服务托管
 | `-config` | 配置文件路径 |
 | `-addr` | 监听地址，默认 `127.0.0.1:0`（端口由系统分配） |
 | `-no-auth` | 关闭 token 认证（仅限可信本机环境） |
-| `-log-level` | 覆盖日志级别：`debug/info/warn/error` |
+| `-log-level` | 启动时覆盖日志级别：`debug/info/warn/error` |
 | `-hide-console` | 隐藏控制台窗口（开机自启自动带上） |
 | `-version` | 显示版本 |
 
@@ -312,6 +313,8 @@ git push origin v1.2.3
 发布构建先复用 CI，通过 Go、Flutter 和发布脚本检查后再打包。CI 与发布使用固定的 Flutter `3.44.9`。
 
 标签必须是 `v` 开头的语义版本（例如 `v1.2.3` 或 `v1.2.3-rc.1`）。手动从分支构建时，产物版本为 `ci-<运行序号>`，客户端数字版本取自 `client/pubspec.yaml`；标签构建则取标签中的数字版本。客户端与安装包的构建号统一使用 GitHub Actions 运行序号。
+
+带预发布段的标签（如 `-rc.1`、`-beta`）会标记为 GitHub Pre-release，并且不会设为 Latest；重跑已有版本时也会同步该标记。仅构建元数据包含连字符（如 `v1.2.3+build-rc.1`）的版本仍按正式版处理。
 
 各平台产物：
 

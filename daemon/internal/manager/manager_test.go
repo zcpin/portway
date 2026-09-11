@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,6 +9,70 @@ import (
 
 	"github.com/byteporter/ssh-tunnel/internal/config"
 )
+
+func TestFailedConfigUpdatePreservesState(t *testing.T) {
+	path, _ := writeBaseConfig(t)
+	mgr := newTestManager(t, path)
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = mgr.AddTunnel(config.Tunnel{
+		Name: "invalid", LocalPort: 13306, RemoteHost: "127.0.0.1", RemotePort: 3306,
+		SSHConnection: "missing",
+	})
+	if err == nil {
+		t.Fatal("无效引用应返回错误")
+	}
+	if len(mgr.GetConfig().Tunnels) != 0 || len(mgr.GetStatus()) != 0 {
+		t.Fatal("失败请求改变了配置或运行状态")
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("失败请求把无效配置写入了磁盘")
+	}
+}
+
+func TestFailedDeleteDoesNotStopRunningTunnel(t *testing.T) {
+	path, key := writeBaseConfig(t)
+	mgr := newTestManager(t, path)
+	if err := mgr.AddTunnel(config.Tunnel{
+		Name: "running", LocalPort: 13306, RemoteHost: "127.0.0.1", RemotePort: 3306,
+		SSHHost: "127.0.0.1:1", SSHUser: "tester", KeyFile: key,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(mgr.Stop)
+	if err := os.Mkdir(path+".tmp", 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.DeleteTunnel("running"); err == nil {
+		t.Fatal("写盘应失败")
+	}
+	if !mgr.GetStatus()["running"] || len(mgr.GetConfig().Tunnels) != 1 {
+		t.Fatal("删除失败却停止或移除了隧道")
+	}
+}
+
+func TestRejectedReloadKeepsPreviousConfig(t *testing.T) {
+	path, _ := writeBaseConfig(t)
+	mgr := newTestManager(t, path)
+	if err := os.WriteFile(path, []byte("log_level = \"invalid\"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.Reload(path); err == nil {
+		t.Fatal("无效文件应被拒绝")
+	}
+	if mgr.GetGlobalSettings().LogLevel != "info" {
+		t.Fatal("Reload 失败改变了内存配置")
+	}
+}
 
 // writeBaseConfig 写入一份没有隧道的配置，返回配置路径与可用的私钥路径。
 func writeBaseConfig(t *testing.T) (cfgPath, keyPath string) {

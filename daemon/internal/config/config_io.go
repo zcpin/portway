@@ -5,7 +5,6 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/BurntSushi/toml"
 )
@@ -41,34 +40,55 @@ func (cio *ConfigIO) GetConfig() *Config {
 	cio.mu.RLock()
 	defer cio.mu.RUnlock()
 
-	// Return a deep copy to prevent concurrent modification
-	result := &Config{
-		LogLevel:             cio.config.LogLevel,
-		ReconnectStrategy:    cio.config.ReconnectStrategy,
-		ReconnectInterval:    cio.config.ReconnectInterval,
-		MaxReconnectAttempts: cio.config.MaxReconnectAttempts,
-		// configDir 未导出，必须手动带上：否则拿到副本的一方解析相对路径时
-		// 会丢掉「配置文件所在目录」这一候选位置
-		configDir: cio.config.configDir,
+	return cloneConfig(cio.config)
+}
+
+func cloneConfig(cfg *Config) *Config {
+	result := *cfg // 保留 configDir，以及尚未显式设置的重连字段。
+	result.SSHConnections = make([]SSHConnection, len(cfg.SSHConnections))
+	copy(result.SSHConnections, cfg.SSHConnections)
+	result.Tunnels = make([]Tunnel, len(cfg.Tunnels))
+	copy(result.Tunnels, cfg.Tunnels)
+	return &result
+}
+
+// validateConfig 在副本上补齐默认值，防止校验把继承关系变成显式配置。
+func validateConfig(cfg *Config) error {
+	validated := cloneConfig(cfg)
+	if err := validated.Validate(); err != nil {
+		return fmt.Errorf("invalid configuration: %w", err)
 	}
+	if _, err := validated.ParseTunnels(); err != nil {
+		return fmt.Errorf("failed to parse tunnels: %w", err)
+	}
+	return nil
+}
 
-	result.SSHConnections = make([]SSHConnection, len(cio.config.SSHConnections))
-	copy(result.SSHConnections, cio.config.SSHConnections)
-
-	result.Tunnels = make([]Tunnel, len(cio.config.Tunnels))
-	copy(result.Tunnels, cio.config.Tunnels)
-
-	return result
+// commit 在调用方持锁时先校验、再持久化，全部成功后才替换内存状态。
+func (cio *ConfigIO) commit(candidate *Config) error {
+	if err := validateConfig(candidate); err != nil {
+		return err
+	}
+	if err := cio.save(candidate); err != nil {
+		return err
+	}
+	cio.config = candidate
+	return nil
 }
 
 // Replace 用一份已加载的配置整体替换内存中的配置。
 //
 // 供 Reload 使用：配置来自磁盘，无需再写回文件，
 // 但必须同步到这里，否则后续 GetConfig 会返回旧配置。
-func (cio *ConfigIO) Replace(cfg *Config) {
+func (cio *ConfigIO) Replace(cfg *Config) error {
 	cio.mu.Lock()
 	defer cio.mu.Unlock()
-	cio.config = cfg
+	candidate := cloneConfig(cfg)
+	if err := validateConfig(candidate); err != nil {
+		return err
+	}
+	cio.config = candidate
+	return nil
 }
 
 // GlobalSettings 返回当前全局配置项（日志级别、重连默认值）。
@@ -109,32 +129,22 @@ func (cio *ConfigIO) SetGlobalSettings(s GlobalSettings) error {
 	s.ReconnectStrategy = strings.TrimSpace(s.ReconnectStrategy)
 	s.ReconnectInterval = strings.TrimSpace(s.ReconnectInterval)
 
+	if s.LogLevel == "" {
+		s.LogLevel = "info"
+	}
 	if s.ReconnectStrategy == "" {
 		s.ReconnectStrategy = "fixed"
 	}
-	if s.ReconnectStrategy != "fixed" && s.ReconnectStrategy != "exponential" {
-		return fmt.Errorf("reconnect_strategy must be 'fixed' or 'exponential', got %q", s.ReconnectStrategy)
-	}
-
 	if s.ReconnectInterval == "" {
 		s.ReconnectInterval = "5s"
 	}
-	if d, err := time.ParseDuration(s.ReconnectInterval); err != nil {
-		return fmt.Errorf("invalid reconnect_interval: %w", err)
-	} else if d <= 0 {
-		return fmt.Errorf("reconnect_interval must be greater than 0, got %s", s.ReconnectInterval)
-	}
 
-	if s.MaxReconnectAttempts < 0 {
-		return fmt.Errorf("max_reconnect_attempts must be >= 0, got %d", s.MaxReconnectAttempts)
-	}
-
-	cio.config.LogLevel = s.LogLevel
-	cio.config.ReconnectStrategy = s.ReconnectStrategy
-	cio.config.ReconnectInterval = s.ReconnectInterval
-	cio.config.MaxReconnectAttempts = s.MaxReconnectAttempts
-
-	return cio.save()
+	candidate := cloneConfig(cio.config)
+	candidate.LogLevel = s.LogLevel
+	candidate.ReconnectStrategy = s.ReconnectStrategy
+	candidate.ReconnectInterval = s.ReconnectInterval
+	candidate.MaxReconnectAttempts = s.MaxReconnectAttempts
+	return cio.commit(candidate)
 }
 
 // AddTunnel adds a new tunnel to the configuration
@@ -156,14 +166,9 @@ func (cio *ConfigIO) AddTunnel(tunnel Tunnel) error {
 		}
 	}
 
-	// Validate tunnel configuration
-	if err := cio.validateTunnel(tunnel); err != nil {
-		return err
-	}
-
-	cio.config.Tunnels = append(cio.config.Tunnels, tunnel)
-
-	return cio.save()
+	candidate := cloneConfig(cio.config)
+	candidate.Tunnels = append(candidate.Tunnels, tunnel)
+	return cio.commit(candidate)
 }
 
 // UpdateTunnel updates an existing tunnel
@@ -172,6 +177,7 @@ func (cio *ConfigIO) UpdateTunnel(name string, updated Tunnel) error {
 	defer cio.mu.Unlock()
 
 	// Find and update the tunnel
+	candidate := cloneConfig(cio.config)
 	found := false
 	for i, t := range cio.config.Tunnels {
 		if t.Name == name {
@@ -182,12 +188,7 @@ func (cio *ConfigIO) UpdateTunnel(name string, updated Tunnel) error {
 				}
 			}
 
-			// Validate tunnel configuration
-			if err := cio.validateTunnel(updated); err != nil {
-				return err
-			}
-
-			cio.config.Tunnels[i] = updated
+			candidate.Tunnels[i] = updated
 			found = true
 			break
 		}
@@ -197,7 +198,7 @@ func (cio *ConfigIO) UpdateTunnel(name string, updated Tunnel) error {
 		return fmt.Errorf("tunnel '%s' not found", name)
 	}
 
-	return cio.save()
+	return cio.commit(candidate)
 }
 
 // DeleteTunnel removes a tunnel from the configuration
@@ -206,7 +207,7 @@ func (cio *ConfigIO) DeleteTunnel(name string) error {
 	defer cio.mu.Unlock()
 
 	found := false
-	newTunnels := make([]Tunnel, 0, len(cio.config.Tunnels)-1)
+	newTunnels := make([]Tunnel, 0, len(cio.config.Tunnels))
 
 	for _, t := range cio.config.Tunnels {
 		if t.Name != name {
@@ -220,13 +221,13 @@ func (cio *ConfigIO) DeleteTunnel(name string) error {
 		return fmt.Errorf("tunnel '%s' not found", name)
 	}
 
-	cio.config.Tunnels = newTunnels
-
-	return cio.save()
+	candidate := cloneConfig(cio.config)
+	candidate.Tunnels = newTunnels
+	return cio.commit(candidate)
 }
 
 // save writes the configuration to disk
-func (cio *ConfigIO) save() error {
+func (cio *ConfigIO) save(candidate *Config) error {
 	if cio.path == "" {
 		return nil
 	}
@@ -241,7 +242,7 @@ func (cio *ConfigIO) save() error {
 
 	// Encode the configuration
 	encoder := toml.NewEncoder(file)
-	if err := encoder.Encode(cio.config); err != nil {
+	if err := encoder.Encode(candidate); err != nil {
 		file.Close()
 		os.Remove(tmpPath)
 		return fmt.Errorf("failed to encode configuration: %w", err)
@@ -274,14 +275,9 @@ func (cio *ConfigIO) AddSSHConnection(conn SSHConnection) error {
 		}
 	}
 
-	// Validate
-	if err := validateSSHConnection(conn); err != nil {
-		return err
-	}
-
-	cio.config.SSHConnections = append(cio.config.SSHConnections, conn)
-
-	return cio.save()
+	candidate := cloneConfig(cio.config)
+	candidate.SSHConnections = append(candidate.SSHConnections, conn)
+	return cio.commit(candidate)
 }
 
 // UpdateSSHConnection updates an SSH connection
@@ -289,13 +285,11 @@ func (cio *ConfigIO) UpdateSSHConnection(name string, conn SSHConnection) error 
 	cio.mu.Lock()
 	defer cio.mu.Unlock()
 
+	candidate := cloneConfig(cio.config)
 	found := false
 	for i, c := range cio.config.SSHConnections {
 		if c.Name == name {
-			if err := validateSSHConnection(conn); err != nil {
-				return err
-			}
-			cio.config.SSHConnections[i] = conn
+			candidate.SSHConnections[i] = conn
 			found = true
 			break
 		}
@@ -305,7 +299,7 @@ func (cio *ConfigIO) UpdateSSHConnection(name string, conn SSHConnection) error 
 		return fmt.Errorf("SSH connection '%s' not found", name)
 	}
 
-	return cio.save()
+	return cio.commit(candidate)
 }
 
 // DeleteSSHConnection removes an SSH connection
@@ -321,7 +315,7 @@ func (cio *ConfigIO) DeleteSSHConnection(name string) error {
 	}
 
 	found := false
-	newConns := make([]SSHConnection, 0, len(cio.config.SSHConnections)-1)
+	newConns := make([]SSHConnection, 0, len(cio.config.SSHConnections))
 
 	for _, c := range cio.config.SSHConnections {
 		if c.Name != name {
@@ -335,57 +329,7 @@ func (cio *ConfigIO) DeleteSSHConnection(name string) error {
 		return fmt.Errorf("SSH connection '%s' not found", name)
 	}
 
-	cio.config.SSHConnections = newConns
-
-	return cio.save()
-}
-
-// validateTunnel validates a single tunnel configuration
-func (cio *ConfigIO) validateTunnel(tunnel Tunnel) error {
-	if tunnel.Name == "" {
-		return fmt.Errorf("tunnel name is required")
-	}
-	if tunnel.LocalPort == 0 {
-		return fmt.Errorf("local_port is required")
-	}
-	if tunnel.RemoteHost == "" {
-		return fmt.Errorf("remote_host is required")
-	}
-	if tunnel.RemotePort == 0 {
-		return fmt.Errorf("remote_port is required")
-	}
-
-	// Either SSH connection reference or direct config
-	if tunnel.SSHConnection == "" && tunnel.SSHHost == "" {
-		return fmt.Errorf("must specify either ssh_connection or ssh_host")
-	}
-
-	if tunnel.SSHConnection == "" {
-		// Direct SSH config
-		if tunnel.SSHUser == "" {
-			return fmt.Errorf("ssh_user is required when not using ssh_connection")
-		}
-		if tunnel.KeyFile == "" {
-			return fmt.Errorf("key_file is required when not using ssh_connection")
-		}
-	}
-
-	return nil
-}
-
-// validateSSHConnection validates an SSH connection configuration
-func validateSSHConnection(conn SSHConnection) error {
-	if conn.Name == "" {
-		return fmt.Errorf("SSH connection name is required")
-	}
-	if conn.Host == "" {
-		return fmt.Errorf("SSH host is required")
-	}
-	if conn.User == "" {
-		return fmt.Errorf("SSH user is required")
-	}
-	if conn.KeyFile == "" {
-		return fmt.Errorf("SSH key file is required")
-	}
-	return nil
+	candidate := cloneConfig(cio.config)
+	candidate.SSHConnections = newConns
+	return cio.commit(candidate)
 }

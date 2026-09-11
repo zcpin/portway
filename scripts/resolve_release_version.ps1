@@ -15,7 +15,7 @@ if ($RunNumber -notmatch '^[1-9][0-9]*$') {
 
 $numericIdentifier = '(?:0|[1-9][0-9]*)'
 $prereleaseIdentifier = '(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)'
-$semver = "(?<build_name>$numericIdentifier\.$numericIdentifier\.$numericIdentifier)(?:-$prereleaseIdentifier(?:\.$prereleaseIdentifier)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+$semver = "(?<build_name>$numericIdentifier\.$numericIdentifier\.$numericIdentifier)(?:-(?<prerelease>$prereleaseIdentifier(?:\.$prereleaseIdentifier)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
 
 if ($RefType -eq 'tag') {
     $versionMatch = [regex]::Match($RefName, "^v(?<version>$semver)$")
@@ -33,10 +33,12 @@ if ($RefType -eq 'tag') {
     $version = "ci-$RunNumber"
 }
 
+$isPrerelease = $RefType -eq 'tag' -and $versionMatch.Groups['prerelease'].Success
 $metadata = [ordered]@{
     version = $version
     build_name = $versionMatch.Groups['build_name'].Value
     build_number = $RunNumber
+    prerelease = $isPrerelease.ToString().ToLowerInvariant()
 }
 
 if ($OutputPath) {

@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"strings"
 	"sync"
 )
 
@@ -42,20 +43,27 @@ type Logger struct {
 	bufPool  sync.Pool
 }
 
+// ParseLevel is shared by initial configuration and runtime level updates.
+func ParseLevel(level string) (LogLevel, error) {
+	switch strings.TrimSpace(level) {
+	case "debug":
+		return DEBUG, nil
+	case "info":
+		return INFO, nil
+	case "warn", "warning":
+		return WARN, nil
+	case "error":
+		return ERROR, nil
+	default:
+		return INFO, fmt.Errorf("invalid log level: %s", level)
+	}
+}
+
 // NewLogger creates a new logger with the specified level and output
 func NewLogger(level string, out io.Writer, errOut io.Writer, useColor bool) (*Logger, error) {
-	lvl := INFO
-	switch level {
-	case "debug":
-		lvl = DEBUG
-	case "info":
-		lvl = INFO
-	case "warn", "warning":
-		lvl = WARN
-	case "error":
-		lvl = ERROR
-	default:
-		return nil, fmt.Errorf("invalid log level: %s", level)
+	lvl, err := ParseLevel(level)
+	if err != nil {
+		return nil, err
 	}
 
 	if out == nil {
@@ -96,10 +104,9 @@ func InitGlobalLoggerWithWriters(level string, out io.Writer, errOut io.Writer, 
 
 // GetGlobalLogger returns the global logger
 func GetGlobalLogger() *Logger {
-	if globalLogger == nil {
-		// Initialize with defaults if not already initialized
-		_ = InitGlobalLogger("info", true)
-	}
+	// 每个读取方都经过 Once，等待初始化完成后再访问指针及其字段。
+	// 不能先无锁检查 globalLogger，否则会与首次初始化并发读写。
+	_ = InitGlobalLogger("info", true)
 	return globalLogger
 }
 

@@ -136,24 +136,32 @@ func (f *Forwarder) handleConnection(localConn net.Conn) {
 
 	logger.Debug("[%s] New connection from %s", f.tunnelName, localConn.RemoteAddr())
 
-	done := make(chan struct{})
-	f.wg.Add(2)
+	done := make(chan error, 2)
 	go func() {
-		defer f.wg.Done()
-		f.copyData(localConn, remoteConn, "local->remote")
+		done <- f.copyData(localConn, remoteConn, "local->remote")
 	}()
 	go func() {
-		defer f.wg.Done()
-		f.copyData(remoteConn, localConn, "remote->local")
-		close(done)
+		done <- f.copyData(remoteConn, localConn, "remote->local")
 	}()
+	// 正常 EOF 只关闭对端的写方向，另一方向仍可继续传输。
+	// 读写失败时关闭两端，确保另一条复制协程也能退出。
+	if err := <-done; err != nil {
+		localConn.Close()
+		remoteConn.Close()
+	}
 	<-done
 }
 
-func (f *Forwarder) copyData(src, dst net.Conn, direction string) {
+func (f *Forwarder) copyData(src, dst net.Conn, direction string) error {
 	// io.Copy 先转发 n > 0 的数据，再处理同次 Read 返回的 EOF/错误。
 	// Stop 通过关闭已登记的连接解除阻塞，无需轮询读超时。
-	_, _ = io.Copy(dst, src)
+	if _, err := io.Copy(dst, src); err != nil {
+		return err
+	}
+	if conn, ok := dst.(interface{ CloseWrite() error }); ok {
+		return conn.CloseWrite()
+	}
+	return nil
 }
 
 func (f *Forwarder) Stop() {

@@ -5,23 +5,25 @@ $testDirectory = Join-Path ([IO.Path]::GetTempPath()) ('ssh-tunnel-version-tests
 [IO.Directory]::CreateDirectory($testDirectory) | Out-Null
 $utf8 = [Text.UTF8Encoding]::new($false)
 $pubspecPath = Join-Path $testDirectory 'pubspec.yaml'
-[IO.File]::WriteAllText($pubspecPath, "name: version_fixture`nversion: 0.8.4+9`n", $utf8)
+[IO.File]::WriteAllText($pubspecPath, "name: version_fixture`nversion: 0.8.4-dev.1+9`n", $utf8)
 
 $cases = @(
-    @{ Type = 'tag'; Name = 'v1.2.3'; Version = '1.2.3'; BuildName = '1.2.3' },
-    @{ Type = 'tag'; Name = 'v2.0.0-rc.1+build.8'; Version = '2.0.0-rc.1+build.8'; BuildName = '2.0.0' },
-    @{ Type = 'branch'; Name = 'main'; Version = 'ci-42'; BuildName = '0.8.4' },
-    @{ Type = 'branch'; Name = 'feature/release'; Version = 'ci-42'; BuildName = '0.8.4' },
-    @{ Type = 'branch'; Name = 'v-next'; Version = 'ci-42'; BuildName = '0.8.4' }
+    @{ Type = 'tag'; Name = 'v1.2.3'; Version = '1.2.3'; BuildName = '1.2.3'; Prerelease = 'false' },
+    @{ Type = 'tag'; Name = 'v1.2.3+build-rc.1'; Version = '1.2.3+build-rc.1'; BuildName = '1.2.3'; Prerelease = 'false' },
+    @{ Type = 'tag'; Name = 'v1.2.3-beta'; Version = '1.2.3-beta'; BuildName = '1.2.3'; Prerelease = 'true' },
+    @{ Type = 'tag'; Name = 'v2.0.0-rc.1+build.8'; Version = '2.0.0-rc.1+build.8'; BuildName = '2.0.0'; Prerelease = 'true' },
+    @{ Type = 'branch'; Name = 'main'; Version = 'ci-42'; BuildName = '0.8.4'; Prerelease = 'false' },
+    @{ Type = 'branch'; Name = 'feature/release'; Version = 'ci-42'; BuildName = '0.8.4'; Prerelease = 'false' },
+    @{ Type = 'branch'; Name = 'v-next'; Version = 'ci-42'; BuildName = '0.8.4'; Prerelease = 'false' }
 )
 
 foreach ($case in $cases) {
     $outputPath = Join-Path $testDirectory ([guid]::NewGuid().ToString('N') + '.outputs')
     $actual = & $resolver -RefType $case.Type -RefName $case.Name -RunNumber '42' -PubspecPath $pubspecPath -OutputPath $outputPath | ConvertFrom-Json
-    if ($actual.version -cne $case.Version -or $actual.build_name -cne $case.BuildName -or $actual.build_number -cne '42') {
+    if ($actual.version -cne $case.Version -or $actual.build_name -cne $case.BuildName -or $actual.build_number -cne '42' -or $actual.prerelease -cne $case.Prerelease) {
         throw "Unexpected version metadata for $($case.Type) $($case.Name): $($actual | ConvertTo-Json -Compress)"
     }
-    $expectedOutput = "version=$($case.Version)`nbuild_name=$($case.BuildName)`nbuild_number=42`n"
+    $expectedOutput = "version=$($case.Version)`nbuild_name=$($case.BuildName)`nbuild_number=42`nprerelease=$($case.Prerelease)`n"
     if ([IO.File]::ReadAllText($outputPath) -cne $expectedOutput) {
         throw "Incorrect GitHub Actions outputs for $($case.Name)"
     }
@@ -51,4 +53,4 @@ foreach ($run in @('', '0', '-1', '42/path')) {
     }
 }
 
-Write-Output 'Release version tests passed (5 valid cases, 10 invalid cases).'
+Write-Output 'Release version tests passed (7 valid cases, 10 invalid cases).'

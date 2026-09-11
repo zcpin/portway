@@ -39,6 +39,7 @@ jobs:
       version: ${{ steps.resolve.outputs.version }}
       build_name: ${{ steps.resolve.outputs.build_name }}
       build_number: ${{ steps.resolve.outputs.build_number }}
+      prerelease: ${{ steps.resolve.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v4
 
@@ -263,7 +264,7 @@ jobs:
   # 推送标签时，把三平台的产物统一附加到对应的 GitHub Release。
   publish:
     name: Publish to GitHub Release
-    needs: [checks, windows, linux, macos]
+    needs: [checks, version, windows, linux, macos]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:
@@ -279,9 +280,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          PRERELEASE: ${{ needs.version.outputs.prerelease }}
         run: |
+          release_flags=(--prerelease="$PRERELEASE")
+          if [ "$PRERELEASE" = "true" ]; then
+            release_flags+=(--latest=false)
+          fi
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" "${release_flags[@]}"
             gh release upload "$GITHUB_REF_NAME" release-assets/* --clobber
           else
-            gh release create "$GITHUB_REF_NAME" release-assets/* --verify-tag --generate-notes
+            gh release create "$GITHUB_REF_NAME" release-assets/* --verify-tag --generate-notes "${release_flags[@]}"
           fi
