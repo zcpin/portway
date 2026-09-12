@@ -109,12 +109,16 @@ func (s *Server) routes() http.Handler {
 
 	mux.Handle("GET /api/ssh-connections", s.auth(http.HandlerFunc(s.handleListSSH)))
 	mux.Handle("POST /api/ssh-connections/test", s.auth(http.HandlerFunc(s.handleTestSSH)))
+	mux.Handle("POST /api/ssh-connections/host-key", s.auth(http.HandlerFunc(s.handleInspectHostKey)))
+	mux.Handle("POST /api/ssh-connections/trust", s.auth(http.HandlerFunc(s.handleTrustHostKey)))
 	mux.Handle("POST /api/ssh-connections", s.auth(http.HandlerFunc(s.handleCreateSSH)))
 	mux.Handle("PUT /api/ssh-connections/{name}", s.auth(http.HandlerFunc(s.handleUpdateSSH)))
 	mux.Handle("DELETE /api/ssh-connections/{name}", s.auth(http.HandlerFunc(s.handleDeleteSSH)))
 
 	mux.Handle("GET /api/keys", s.auth(http.HandlerFunc(s.handleListKeys)))
 	mux.Handle("GET /api/keys/stat", s.auth(http.HandlerFunc(s.handleStatKey)))
+	mux.Handle("POST /api/keys/unlock", s.auth(http.HandlerFunc(s.handleUnlockKey)))
+	mux.Handle("POST /api/keys/lock", s.auth(http.HandlerFunc(s.handleLockKey)))
 
 	mux.Handle("GET /api/logs", s.auth(http.HandlerFunc(s.handleLogs)))
 	mux.Handle("POST /api/reload", s.auth(http.HandlerFunc(s.handleReload)))

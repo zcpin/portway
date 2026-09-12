@@ -12,6 +12,8 @@ class Tunnel {
   final String sshHost;
   final String sshUser;
   final String keyFile;
+  final String authMethod;
+  final String agentSocket;
   final String hostKeyCheck;
   final String knownHostsFile;
   final String reconnectStrategy;
@@ -34,6 +36,8 @@ class Tunnel {
     required this.sshHost,
     required this.sshUser,
     this.keyFile = '',
+    this.authMethod = 'key',
+    this.agentSocket = '',
     this.hostKeyCheck = '',
     this.knownHostsFile = '',
     required this.reconnectStrategy,
@@ -57,6 +61,8 @@ class Tunnel {
         sshHost: j['ssh_host'] as String? ?? '',
         sshUser: j['ssh_user'] as String? ?? '',
         keyFile: j['key_file'] as String? ?? '',
+        authMethod: j['auth_method'] as String? ?? 'key',
+        agentSocket: j['agent_socket'] as String? ?? '',
         hostKeyCheck: j['host_key_check'] as String? ?? '',
         knownHostsFile: j['known_hosts_file'] as String? ?? '',
         reconnectStrategy: j['reconnect_strategy'] as String? ?? '',
@@ -80,6 +86,8 @@ class Tunnel {
         if (sshHost.isNotEmpty) 'ssh_host': sshHost,
         if (sshUser.isNotEmpty) 'ssh_user': sshUser,
         if (keyFile.isNotEmpty) 'key_file': keyFile,
+        if (authMethod == 'agent') 'auth_method': authMethod,
+        if (agentSocket.isNotEmpty) 'agent_socket': agentSocket,
         if (hostKeyCheck.isNotEmpty) 'host_key_check': hostKeyCheck,
         if (knownHostsFile.isNotEmpty) 'known_hosts_file': knownHostsFile,
         'reconnect_strategy': reconnectStrategy,
@@ -117,6 +125,8 @@ class Tunnel {
         sshHost: sshHost,
         sshUser: sshUser,
         keyFile: keyFile,
+        authMethod: authMethod,
+        agentSocket: agentSocket,
         hostKeyCheck: hostKeyCheck,
         knownHostsFile: knownHostsFile,
         reconnectStrategy: reconnectStrategy,
@@ -136,6 +146,21 @@ class Tunnel {
         retryCount: runtime['retry_count'] as int?,
         connectedAt: runtime['connected_at'] as String?,
       );
+}
+
+class HostKeyInfo {
+  final String host;
+  final String fingerprint;
+  final String algorithm;
+  final String file;
+  final bool known;
+  final bool changed;
+  const HostKeyInfo({required this.host, required this.fingerprint, required this.algorithm,
+    required this.file, required this.known, required this.changed});
+  factory HostKeyInfo.fromJson(Map<String, dynamic> json) => HostKeyInfo(
+    host: json['host'] as String, fingerprint: json['fingerprint'] as String,
+    algorithm: json['algorithm'] as String, file: json['file'] as String,
+    known: json['known'] == true, changed: json['changed'] == true);
 }
 
 class ConnectionDiagnostic {
@@ -214,6 +239,8 @@ class SshConnection {
   final String host;
   final String user;
   final String keyFile;
+  final String authMethod;
+  final String agentSocket;
   final String hostKeyCheck;
   final String knownHostsFile;
 
@@ -222,6 +249,8 @@ class SshConnection {
     required this.host,
     required this.user,
     required this.keyFile,
+    this.authMethod = 'key',
+    this.agentSocket = '',
     this.hostKeyCheck = '',
     this.knownHostsFile = '',
   });
@@ -231,6 +260,8 @@ class SshConnection {
         host: j['host'] as String? ?? '',
         user: j['user'] as String? ?? '',
         keyFile: j['key_file'] as String? ?? '',
+        authMethod: j['auth_method'] as String? ?? 'key',
+        agentSocket: j['agent_socket'] as String? ?? '',
         hostKeyCheck: j['host_key_check'] as String? ?? '',
         knownHostsFile: j['known_hosts_file'] as String? ?? '',
       );
@@ -240,6 +271,8 @@ class SshConnection {
         'host': host,
         'user': user,
         'key_file': keyFile,
+        if (authMethod == 'agent') 'auth_method': authMethod,
+        if (agentSocket.isNotEmpty) 'agent_socket': agentSocket,
         if (hostKeyCheck.isNotEmpty) 'host_key_check': hostKeyCheck,
         if (knownHostsFile.isNotEmpty) 'known_hosts_file': knownHostsFile,
       };
@@ -276,6 +309,8 @@ class KeyInfo {
   final String path;
   final String resolved;
   final bool exists;
+  final bool encrypted;
+  final bool unlocked;
   final int size;
   final String modified;
   final List<String> usedBy;
@@ -285,6 +320,8 @@ class KeyInfo {
     required this.path,
     required this.resolved,
     required this.exists,
+    this.encrypted = false,
+    this.unlocked = false,
     required this.size,
     required this.modified,
     required this.usedBy,
@@ -295,6 +332,8 @@ class KeyInfo {
         path: j['path'] as String? ?? '',
         resolved: j['resolved'] as String? ?? '',
         exists: j['exists'] as bool? ?? false,
+        encrypted: j['encrypted'] as bool? ?? false,
+        unlocked: j['unlocked'] as bool? ?? false,
         size: _asInt(j['size']),
         modified: j['modified'] as String? ?? '',
         usedBy: (j['used_by'] as List? ?? const [])

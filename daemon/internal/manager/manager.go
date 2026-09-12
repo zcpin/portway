@@ -19,6 +19,7 @@ type Manager struct {
 	updateMu   sync.Mutex // 串行化配置提交及其运行状态、日志级别的应用。
 	stopOnce   sync.Once
 	running    bool
+	keys       *tunnel.KeyStore
 }
 
 // NewManager creates a new tunnel manager
@@ -42,11 +43,12 @@ func NewManager(cfg *config.Config, configPath string) (*Manager, error) {
 		tunnels:    make(map[string]*tunnel.Tunnel),
 		configIO:   configIO,
 		configPath: configPath,
+		keys:       tunnel.NewKeyStore(),
 	}
 
 	// Create tunnels from configuration
 	for _, parsedTunnel := range parsedTunnels {
-		tun, err := tunnel.NewTunnel(parsedTunnel)
+		tun, err := tunnel.NewTunnel(parsedTunnel, mgr.keys)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create tunnel %s: %w", parsedTunnel.Name, err)
 		}
@@ -113,6 +115,7 @@ func (m *Manager) Stop() {
 		m.mu.Unlock()
 
 		logger.Info("All tunnels stopped")
+		m.keys.Clear()
 	})
 }
 
@@ -315,7 +318,7 @@ func (m *Manager) reloadInternal() error {
 			continue
 		}
 
-		newTun, err := tunnel.NewTunnel(pt)
+		newTun, err := tunnel.NewTunnel(pt, m.keys)
 		if err != nil {
 			return fmt.Errorf("failed to create tunnel %s: %w", pt.Name, err)
 		}
@@ -414,6 +417,8 @@ func parsedTunnelEqual(a, b config.ParsedTunnel) bool {
 		a.SSHHost == b.SSHHost &&
 		a.SSHUser == b.SSHUser &&
 		a.KeyFile == b.KeyFile &&
+		a.AuthMethod == b.AuthMethod &&
+		a.AgentSocket == b.AgentSocket &&
 		a.HostKeyCheck == b.HostKeyCheck &&
 		a.KnownHostsFile == b.KnownHostsFile &&
 		a.ReconnectStrategy == b.ReconnectStrategy &&

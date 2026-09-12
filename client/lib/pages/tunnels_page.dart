@@ -5,6 +5,7 @@ import '../models.dart';
 import '../providers.dart';
 import '../services/daemon_client.dart';
 import '../widgets.dart';
+import 'ssh_security.dart';
 
 /// 打开隧道新建/编辑对话框，保存成功后刷新列表。
 Future<void> openTunnelEditor(
@@ -349,6 +350,11 @@ class _TunnelEditorState extends ConsumerState<TunnelEditorDialog> {
   late final TextEditingController _sshHost;
   late final TextEditingController _sshUser;
   late final TextEditingController _keyFile;
+  late final TextEditingController _agentSocket;
+  late final TextEditingController _knownHosts;
+  String _authMethod = 'key';
+  String _hostKeyCheck = '';
+  bool _securityBusy = false;
   late final TextEditingController _interval;
   late final TextEditingController _maxAttempts;
 
@@ -372,6 +378,10 @@ class _TunnelEditorState extends ConsumerState<TunnelEditorDialog> {
     _sshHost = TextEditingController(text: t?.sshHost ?? '');
     _sshUser = TextEditingController(text: t?.sshUser ?? '');
     _keyFile = TextEditingController(text: t?.keyFile ?? '');
+    _agentSocket = TextEditingController(text: t?.agentSocket ?? '');
+    _knownHosts = TextEditingController(text: t?.knownHostsFile ?? '');
+    _authMethod = t?.authMethod == 'agent' ? 'agent' : 'key';
+    _hostKeyCheck = t?.hostKeyCheck ?? '';
     _interval = TextEditingController(text: t?.reconnectInterval ?? '');
     _maxAttempts =
         TextEditingController(text: t != null ? '${t.maxReconnectAttempts}' : '0');
@@ -391,6 +401,8 @@ class _TunnelEditorState extends ConsumerState<TunnelEditorDialog> {
       _sshHost,
       _sshUser,
       _keyFile,
+      _agentSocket,
+      _knownHosts,
       _interval,
       _maxAttempts,
     ]) {
@@ -505,12 +517,33 @@ class _TunnelEditorState extends ConsumerState<TunnelEditorDialog> {
                     ],
                   ),
                   const SizedBox(height: 12),
-                  TextFormField(
-                    controller: _keyFile,
-                    decoration: const InputDecoration(labelText: '私钥路径 *'),
-                    validator: (v) =>
-                        (v == null || v.trim().isEmpty) ? '请填写私钥路径' : null,
-                  ),
+                  DropdownButtonFormField<String>(initialValue: _authMethod,
+                    decoration: const InputDecoration(labelText: '认证方式'),
+                    items: const [DropdownMenuItem(value: 'key', child: Text('私钥文件')),
+                      DropdownMenuItem(value: 'agent', child: Text('SSH agent'))],
+                    onChanged: (value) => setState(() => _authMethod = value!)),
+                  const SizedBox(height: 12),
+                  if (_authMethod == 'key') ...[
+                    TextFormField(controller: _keyFile,
+                      decoration: const InputDecoration(labelText: '私钥路径 *'),
+                      validator: (v) => (v == null || v.trim().isEmpty) ? '请填写私钥路径' : null),
+                    TextButton.icon(onPressed: _securityBusy ? null : () async {
+                      if (_keyFile.text.trim().isNotEmpty) await unlockPrivateKey(context, ref, _keyFile.text.trim());
+                    }, icon: const Icon(Icons.lock_open), label: const Text('解锁私钥')),
+                  ] else TextFormField(controller: _agentSocket,
+                    decoration: const InputDecoration(labelText: 'Agent 地址（留空使用系统默认）')),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(key: ValueKey(_hostKeyCheck), initialValue: _hostKeyCheck,
+                    decoration: const InputDecoration(labelText: '主机密钥校验'),
+                    items: const [DropdownMenuItem(value: '', child: Text('known_hosts（默认）')),
+                      DropdownMenuItem(value: 'known_hosts', child: Text('known_hosts')),
+                      DropdownMenuItem(value: 'insecure', child: Text('不校验（insecure）'))],
+                    onChanged: (value) => setState(() => _hostKeyCheck = value!)),
+                  const SizedBox(height: 12),
+                  TextFormField(controller: _knownHosts,
+                    decoration: const InputDecoration(labelText: 'known_hosts 路径（留空使用默认）')),
+                  TextButton.icon(onPressed: _securityBusy ? null : _inspectHost,
+                    icon: const Icon(Icons.verified_user_outlined), label: Text(_securityBusy ? '检查中…' : '查看主机指纹')),
                 ],
                 const SizedBox(height: 12),
                 Row(
@@ -578,8 +611,10 @@ class _TunnelEditorState extends ConsumerState<TunnelEditorDialog> {
       sshHost: _sshConnection == null ? _sshHost.text.trim() : '',
       sshUser: _sshConnection == null ? _sshUser.text.trim() : '',
       keyFile: _sshConnection == null ? _keyFile.text.trim() : '',
-      hostKeyCheck: (widget.editing ?? widget.initial)?.hostKeyCheck ?? '',
-      knownHostsFile: (widget.editing ?? widget.initial)?.knownHostsFile ?? '',
+      authMethod: _authMethod,
+      agentSocket: _agentSocket.text.trim(),
+      hostKeyCheck: _hostKeyCheck,
+      knownHostsFile: _knownHosts.text.trim(),
       reconnectStrategy: _strategy,
       reconnectInterval: _interval.text.trim(),
       maxReconnectAttempts: int.tryParse(_maxAttempts.text.trim()) ?? 0,
@@ -587,5 +622,15 @@ class _TunnelEditorState extends ConsumerState<TunnelEditorDialog> {
     );
 
     Navigator.pop(context, tunnel);
+  }
+
+  Future<void> _inspectHost() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() => _securityBusy = true);
+    final trusted = await inspectAndTrustHostKey(context, ref, SshConnection(
+      name: _name.text.trim(), host: _sshHost.text.trim(), user: _sshUser.text.trim(),
+      keyFile: _keyFile.text.trim(), authMethod: _authMethod,
+      agentSocket: _agentSocket.text.trim(), hostKeyCheck: _hostKeyCheck, knownHostsFile: _knownHosts.text.trim()));
+    if (mounted) setState(() { _securityBusy = false; if (trusted) _hostKeyCheck = 'known_hosts'; });
   }
 }

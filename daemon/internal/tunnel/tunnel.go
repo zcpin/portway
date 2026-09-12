@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"os"
 	"sync"
 	"time"
 
@@ -47,6 +46,8 @@ type Tunnel struct {
 	isRunning  bool
 	manualStop bool
 	status     RuntimeStatus
+	keys       *KeyStore
+	agentDial  func(context.Context, string) (net.Conn, error)
 
 	// dial 建立 SSH 连接，默认走 createSSHConnection，测试可替换
 	dial func(ctx context.Context) (sshConn, error)
@@ -58,7 +59,7 @@ type Tunnel struct {
 }
 
 // NewTunnel creates a new tunnel with the given configuration
-func NewTunnel(cfg config.ParsedTunnel) (*Tunnel, error) {
+func NewTunnel(cfg config.ParsedTunnel, keys ...*KeyStore) (*Tunnel, error) {
 	strategy, err := ParseStrategy(string(cfg.ReconnectStrategy), cfg.ReconnectInterval)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse reconnect strategy: %w", err)
@@ -70,6 +71,10 @@ func NewTunnel(cfg config.ParsedTunnel) (*Tunnel, error) {
 		connectTimeout:    sshConnectTimeout,
 		keepAliveInterval: defaultKeepAliveInterval,
 		keepAliveTimeout:  defaultKeepAliveTimeout,
+		agentDial:         dialSSHAgent,
+	}
+	if len(keys) != 0 {
+		t.keys = keys[0]
 	}
 	t.dial = t.createSSHConnection
 	return t, nil
@@ -330,17 +335,17 @@ func (t *Tunnel) keepAlive(ctx context.Context, client sshConn) {
 // 不用 ssh.Dial 而是自己管理底层连接：这样 ctx 取消（用户点停止）能中断
 // 正在进行的拨号与握手，而不是让 Stop 一直等到 30 秒超时。
 func (t *Tunnel) createSSHConnection(ctx context.Context) (sshConn, error) {
-	// Read the private key
-	key, err := os.ReadFile(t.config.KeyFile)
-	if err != nil {
-		return nil, fmt.Errorf("unable to read private key %s: %w", t.config.KeyFile, err)
+	timeout := t.connectTimeout
+	if timeout <= 0 {
+		timeout = sshConnectTimeout
 	}
-
-	// Parse the private key
-	signer, err := ssh.ParsePrivateKey(key)
+	connectCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	auth, cleanup, err := t.authentication(connectCtx)
 	if err != nil {
-		return nil, fmt.Errorf("unable to parse private key: %w", err)
+		return nil, err
 	}
+	defer cleanup()
 
 	hostKeyCallback, err := t.hostKeyCallback()
 	if err != nil {
@@ -349,21 +354,13 @@ func (t *Tunnel) createSSHConnection(ctx context.Context) (sshConn, error) {
 
 	// Create SSH client config
 	sshConfig := &ssh.ClientConfig{
-		User: t.config.SSHUser,
-		Auth: []ssh.AuthMethod{
-			ssh.PublicKeys(signer),
-		},
+		User:            t.config.SSHUser,
+		Auth:            []ssh.AuthMethod{auth},
 		HostKeyCallback: hostKeyCallback,
 		Timeout:         sshConnectTimeout,
 	}
 
 	// 同一个超时覆盖 TCP 拨号与 SSH 握手，取消时关闭底层连接解除阻塞。
-	timeout := t.connectTimeout
-	if timeout <= 0 {
-		timeout = sshConnectTimeout
-	}
-	connectCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
 	dialer := &net.Dialer{}
 	netConn, err := dialer.DialContext(connectCtx, "tcp", t.config.SSHHost)
 	if err != nil {

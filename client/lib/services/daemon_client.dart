@@ -128,6 +128,14 @@ class DaemonClient {
     return KeyInfo.fromJson(resp.data);
   }
 
+  Future<void> unlockKey(String path, String passphrase) => _post('/api/keys/unlock', {'path': path, 'passphrase': passphrase});
+  Future<void> lockKey(String path) => _post('/api/keys/lock', {'path': path});
+  Future<HostKeyInfo> inspectHostKey(SshConnection connection) async =>
+      HostKeyInfo.fromJson((await _dio.post('/api/ssh-connections/host-key', data: connection.toJson())).data);
+  Future<HostKeyInfo> trustHostKey(SshConnection connection, String fingerprint, bool replace) async =>
+      HostKeyInfo.fromJson((await _dio.post('/api/ssh-connections/trust',
+        data: {'connection': connection.toJson(), 'fingerprint': fingerprint, 'replace': replace})).data);
+
   Future<void> reload() => _post('/api/reload', null);
 
   Future<ConfigExport> exportConfig() async => ConfigExport.fromJson((await _dio.get('/api/config/export')).data);

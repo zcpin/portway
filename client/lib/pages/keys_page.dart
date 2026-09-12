@@ -7,6 +7,7 @@ import '../models.dart';
 import '../providers.dart';
 import '../services/daemon_client.dart';
 import '../widgets.dart';
+import 'ssh_security.dart';
 
 /// 私钥页。私钥不上传到 daemon，配置里只记录本地文件路径，
 /// 这里汇总展示「配置引用了哪些文件、文件是否还在、被谁引用」。
@@ -59,13 +60,13 @@ class KeysPage extends ConsumerWidget {
   }
 }
 
-class _KeyCard extends StatelessWidget {
+class _KeyCard extends ConsumerWidget {
   final KeyInfo keyInfo;
 
   const _KeyCard({required this.keyInfo});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final missing = !keyInfo.exists;
 
@@ -80,6 +81,7 @@ class _KeyCard extends StatelessWidget {
         title: Row(
           children: [
             Expanded(child: Text(keyInfo.name)),
+            if (keyInfo.encrypted) Text(keyInfo.unlocked ? '已解锁（本次会话）' : '口令保护'),
             if (missing)
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -116,11 +118,18 @@ class _KeyCard extends StatelessWidget {
             ),
           ],
         ),
-        trailing: IconButton(
+        trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+          if (keyInfo.encrypted) TextButton(onPressed: () async {
+            if (!keyInfo.unlocked) { await unlockPrivateKey(context, ref, keyInfo.path); return; }
+            try { await ref.read(keysProvider.notifier).lock(keyInfo.path); }
+            catch (error) { if (context.mounted) showErrorSnack(context, error); }
+          }, child: Text(keyInfo.unlocked ? '锁定' : '解锁')),
+          IconButton(
           icon: const Icon(Icons.folder_open_outlined),
           tooltip: '在文件管理器中显示',
           onPressed: keyInfo.exists ? () => _reveal(context) : null,
-        ),
+          ),
+        ]),
       ),
     );
   }

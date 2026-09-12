@@ -7,6 +7,7 @@ import '../models.dart';
 import '../providers.dart';
 import '../services/daemon_client.dart';
 import '../widgets.dart';
+import 'ssh_security.dart';
 
 /// 打开 SSH 连接新建/编辑对话框。
 Future<void> openConnectionEditor(
@@ -112,7 +113,7 @@ class _ConnectionCard extends ConsumerWidget {
             runSpacing: 6,
             children: [
               Text('${connection.user}@${connection.host}'),
-              Text('密钥：${connection.keyFile}'),
+              Text(connection.authMethod == 'agent' ? '认证：SSH agent' : '密钥：${connection.keyFile}'),
             ],
           ),
         ),
@@ -161,6 +162,10 @@ class _ConnectionEditorState extends ConsumerState<ConnectionEditorDialog> {
   late final TextEditingController _host;
   late final TextEditingController _user;
   late final TextEditingController _keyFile;
+  late final TextEditingController _agentSocket;
+  late final TextEditingController _knownHosts;
+  String _authMethod = 'key';
+  String _hostKeyCheck = '';
 
   _KeyState _keyState = _KeyState.unknown;
   String _keyMessage = '';
@@ -175,9 +180,13 @@ class _ConnectionEditorState extends ConsumerState<ConnectionEditorDialog> {
     _host = TextEditingController(text: c?.host ?? '');
     _user = TextEditingController(text: c?.user ?? '');
     _keyFile = TextEditingController(text: c?.keyFile ?? '');
+    _agentSocket = TextEditingController(text: c?.agentSocket ?? '');
+    _knownHosts = TextEditingController(text: c?.knownHostsFile ?? '');
+    _authMethod = c?.authMethod == 'agent' ? 'agent' : 'key';
+    _hostKeyCheck = c?.hostKeyCheck ?? '';
 
     // 编辑已有连接时，先确认一次当前路径是否仍然有效
-    if (c != null && c.keyFile.isNotEmpty) {
+    if (c != null && c.keyFile.isNotEmpty && _authMethod == 'key') {
       WidgetsBinding.instance.addPostFrameCallback((_) => _validateKey());
     }
   }
@@ -185,7 +194,7 @@ class _ConnectionEditorState extends ConsumerState<ConnectionEditorDialog> {
   @override
   void dispose() {
     _testCancel?.cancel();
-    for (final c in [_name, _host, _user, _keyFile]) {
+    for (final c in [_name, _host, _user, _keyFile, _agentSocket, _knownHosts]) {
       c.dispose();
     }
     super.dispose();
@@ -193,138 +202,70 @@ class _ConnectionEditorState extends ConsumerState<ConnectionEditorDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final keys = ref.watch(keysProvider).valueOrNull ?? [];
-
+    final keys = _authMethod == 'key' ? ref.watch(keysProvider).valueOrNull ?? <KeyInfo>[] : <KeyInfo>[];
     return AlertDialog(
       title: Text(widget.editing == null ? '新建 SSH 连接' : '编辑 SSH 连接'),
-      content: SizedBox(
-        width: 480,
-        child: Form(
-          key: _formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextFormField(
-                controller: _name,
-                enabled: widget.editing == null,
-                decoration: const InputDecoration(labelText: '连接名称 *'),
-                validator: (v) =>
-                    (v == null || v.trim().isEmpty) ? '请填写名称' : null,
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _host,
-                decoration:
-                    const InputDecoration(labelText: '主机 *（host 或 host:port）'),
-                validator: (v) =>
-                    (v == null || v.trim().isEmpty) ? '请填写主机' : null,
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _user,
-                decoration: const InputDecoration(labelText: '用户名 *'),
-                validator: (v) =>
-                    (v == null || v.trim().isEmpty) ? '请填写用户名' : null,
-              ),
-              const SizedBox(height: 12),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: TextFormField(
-                      controller: _keyFile,
-                      decoration: const InputDecoration(
-                        labelText: '私钥路径 *',
-                        hintText: r'C:\Users\me\.ssh\id_ed25519',
-                      ),
-                      validator: (v) =>
-                          (v == null || v.trim().isEmpty) ? '请填写私钥路径' : null,
-                      onChanged: (_) => setState(() {
-                        _keyState = _KeyState.unknown;
-                        _keyMessage = '';
-                      }),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  OutlinedButton.icon(
-                    onPressed: _pickKeyFile,
-                    icon: const Icon(Icons.folder_open_outlined),
-                    label: const Text('选择文件'),
-                  ),
-                ],
-              ),
-              if (_keyState != _KeyState.unknown) ...[
-                const SizedBox(height: 6),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Row(
-                    children: [
-                      _keyState == _KeyState.checking
-                          ? const SizedBox(
-                              width: 12,
-                              height: 12,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : Icon(
-                              _keyState == _KeyState.ok
-                                  ? Icons.check_circle_outline
-                                  : Icons.warning_amber_outlined,
-                              size: 14,
-                              color: _keyState == _KeyState.ok
-                                  ? Colors.green
-                                  : Theme.of(context).colorScheme.error,
-                            ),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          _keyMessage,
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-              if (keys.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Wrap(
-                    spacing: 6,
-                    children: [
-                      for (final k in keys)
-                        ActionChip(
-                          avatar: Icon(
-                            k.exists
-                                ? Icons.key_outlined
-                                : Icons.warning_amber_outlined,
-                            size: 16,
-                            color: k.exists ? null : Colors.orange,
-                          ),
-                          label: Text(k.name),
-                          onPressed: () {
-                            _keyFile.text = k.path;
-                            _validateKey();
-                          },
-                        ),
-                    ],
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
-      ),
+      content: SizedBox(width: 520, child: SingleChildScrollView(
+        child: AbsorbPointer(absorbing: _testing, child: Form(key: _formKey,
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            TextFormField(controller: _name, enabled: widget.editing == null,
+              decoration: const InputDecoration(labelText: '连接名称 *'),
+              validator: (v) => (v == null || v.trim().isEmpty) ? '请填写名称' : null),
+            const SizedBox(height: 12),
+            TextFormField(controller: _host,
+              decoration: const InputDecoration(labelText: '主机 *（host 或 host:port）'),
+              validator: (v) => (v == null || v.trim().isEmpty) ? '请填写主机' : null),
+            const SizedBox(height: 12),
+            TextFormField(controller: _user,
+              decoration: const InputDecoration(labelText: '用户名 *'),
+              validator: (v) => (v == null || v.trim().isEmpty) ? '请填写用户名' : null),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(initialValue: _authMethod,
+              decoration: const InputDecoration(labelText: '认证方式'),
+              items: const [DropdownMenuItem(value: 'key', child: Text('私钥文件')),
+                DropdownMenuItem(value: 'agent', child: Text('SSH agent'))],
+              onChanged: (value) => setState(() => _authMethod = value!)),
+            const SizedBox(height: 12),
+            if (_authMethod == 'key') ...[
+              Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Expanded(child: TextFormField(controller: _keyFile,
+                  decoration: const InputDecoration(labelText: '私钥路径 *'),
+                  validator: (v) => (v == null || v.trim().isEmpty) ? '请填写私钥路径' : null,
+                  onChanged: (_) => setState(() { _keyState = _KeyState.unknown; _keyMessage = ''; }))),
+                const SizedBox(width: 8),
+                OutlinedButton.icon(onPressed: _pickKeyFile,
+                  icon: const Icon(Icons.folder_open_outlined), label: const Text('选择文件')),
+              ]),
+              if (_keyMessage.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 6),
+                child: Text(_keyMessage, style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: _keyState == _KeyState.missing ? Theme.of(context).colorScheme.error : null))),
+              Align(alignment: Alignment.centerLeft, child: TextButton.icon(onPressed: _unlock,
+                icon: const Icon(Icons.lock_open), label: const Text('解锁私钥'))),
+              if (keys.isNotEmpty) Wrap(spacing: 6, children: [for (final key in keys)
+                ActionChip(label: Text(key.name), onPressed: () { _keyFile.text = key.path; _validateKey(); })]),
+            ] else
+              TextFormField(controller: _agentSocket,
+                decoration: const InputDecoration(labelText: 'Agent 地址（留空使用系统默认）')),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(key: ValueKey(_hostKeyCheck), initialValue: _hostKeyCheck,
+              decoration: const InputDecoration(labelText: '主机密钥校验'),
+              items: const [DropdownMenuItem(value: '', child: Text('known_hosts（默认）')),
+                DropdownMenuItem(value: 'known_hosts', child: Text('known_hosts')),
+                DropdownMenuItem(value: 'insecure', child: Text('不校验（insecure）'))],
+              onChanged: (value) => setState(() => _hostKeyCheck = value!)),
+            const SizedBox(height: 12),
+            TextFormField(controller: _knownHosts,
+              decoration: const InputDecoration(labelText: 'known_hosts 路径（留空使用默认）')),
+            Align(alignment: Alignment.centerLeft, child: TextButton.icon(onPressed: _inspectHost,
+              icon: const Icon(Icons.verified_user_outlined), label: const Text('查看主机指纹'))),
+          ]),
+        )),
+      )),
       actions: [
-        OutlinedButton.icon(
-          onPressed: _testing ? null : _testConnection,
-          icon: const Icon(Icons.network_check),
-          label: Text(_testing ? '测试中…' : '测试连接'),
-        ),
-        TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('取消')),
-        FilledButton(onPressed: _submit, child: const Text('保存')),
+        OutlinedButton.icon(onPressed: _testing ? null : _testConnection,
+          icon: const Icon(Icons.network_check), label: Text(_testing ? '测试中…' : '测试连接')),
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
+        FilledButton(onPressed: _testing ? null : _submit, child: const Text('保存')),
       ],
     );
   }
@@ -358,9 +299,10 @@ class _ConnectionEditorState extends ConsumerState<ConnectionEditorDialog> {
       final info = await ref.read(keysProvider.notifier).stat(path);
       if (!mounted) return;
       setState(() {
-        _keyState = info.exists ? _KeyState.ok : _KeyState.missing;
-        _keyMessage = info.exists
-            ? 'daemon 可读：${info.resolved}'
+        _keyState = info.exists && (!info.encrypted || info.unlocked) ? _KeyState.ok : _KeyState.missing;
+        _keyMessage = info.encrypted
+            ? info.unlocked ? '私钥已在当前 daemon 会话解锁' : '私钥受口令保护，请先解锁'
+            : info.exists ? '路径存在：${info.resolved}'
             : 'daemon 无法读取该路径（${info.resolved}），请确认文件存在且权限正确';
       });
     } catch (e) {
@@ -382,9 +324,23 @@ class _ConnectionEditorState extends ConsumerState<ConnectionEditorDialog> {
         host: _host.text.trim(),
         user: _user.text.trim(),
         keyFile: _keyFile.text.trim(),
-        hostKeyCheck: widget.editing?.hostKeyCheck ?? '',
-        knownHostsFile: widget.editing?.knownHostsFile ?? '',
+        authMethod: _authMethod,
+        agentSocket: _agentSocket.text.trim(),
+        hostKeyCheck: _hostKeyCheck,
+        knownHostsFile: _knownHosts.text.trim(),
       );
+
+  Future<void> _inspectHost() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() => _testing = true);
+    final trusted = await inspectAndTrustHostKey(context, ref, _connection());
+    if (mounted) setState(() { _testing = false; if (trusted) _hostKeyCheck = 'known_hosts'; });
+  }
+
+  Future<void> _unlock() async {
+    if (_keyFile.text.trim().isEmpty) return;
+    if (await unlockPrivateKey(context, ref, _keyFile.text.trim()) && mounted) await _validateKey();
+  }
 
   Future<void> _testConnection() async {
     if (!_formKey.currentState!.validate()) return;

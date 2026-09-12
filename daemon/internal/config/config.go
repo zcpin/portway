@@ -39,10 +39,12 @@ type GlobalSettings struct {
 
 // SSHConnection represents a reusable SSH connection configuration
 type SSHConnection struct {
-	Name    string `toml:"name" json:"name"`
-	Host    string `toml:"host" json:"host"`
-	User    string `toml:"user" json:"user"`
-	KeyFile string `toml:"key_file" json:"key_file"`
+	Name        string `toml:"name" json:"name"`
+	Host        string `toml:"host" json:"host"`
+	User        string `toml:"user" json:"user"`
+	KeyFile     string `toml:"key_file" json:"key_file"`
+	AuthMethod  string `toml:"auth_method,omitempty" json:"auth_method,omitempty"`
+	AgentSocket string `toml:"agent_socket,omitempty" json:"agent_socket,omitempty"`
 	// HostKeyCheck 控制主机密钥校验：known_hosts（默认）或 insecure（不校验）
 	HostKeyCheck string `toml:"host_key_check,omitempty" json:"host_key_check,omitempty"`
 	// KnownHostsFile 指定 known_hosts 文件；留空时用 ~/.ssh/known_hosts
@@ -63,6 +65,8 @@ type Tunnel struct {
 	SSHHost              string `toml:"ssh_host,omitempty" json:"ssh_host,omitempty"`
 	SSHUser              string `toml:"ssh_user,omitempty" json:"ssh_user,omitempty"`
 	KeyFile              string `toml:"key_file,omitempty" json:"key_file,omitempty"`
+	AuthMethod           string `toml:"auth_method,omitempty" json:"auth_method,omitempty"`
+	AgentSocket          string `toml:"agent_socket,omitempty" json:"agent_socket,omitempty"`
 	HostKeyCheck         string `toml:"host_key_check,omitempty" json:"host_key_check,omitempty"`     // known_hosts（默认）或 insecure
 	KnownHostsFile       string `toml:"known_hosts_file,omitempty" json:"known_hosts_file,omitempty"` // 留空时用 ~/.ssh/known_hosts
 	ReconnectStrategy    string `toml:"reconnect_strategy" json:"reconnect_strategy"`                 // "fixed" or "exponential"
@@ -99,6 +103,8 @@ type ParsedTunnel struct {
 	SSHHost              string
 	SSHUser              string
 	KeyFile              string
+	AuthMethod           string
+	AgentSocket          string
 	HostKeyCheck         string
 	KnownHostsFile       string
 	ReconnectStrategy    ReconnectStrategy
@@ -178,8 +184,8 @@ func (c *Config) Validate() error {
 		if conn.User == "" {
 			return fmt.Errorf("SSH connection %s: user is required", conn.Name)
 		}
-		if conn.KeyFile == "" {
-			return fmt.Errorf("SSH connection %s: key_file is required", conn.Name)
+		if err := validateAuth(conn.Name, conn.AuthMethod, conn.KeyFile); err != nil {
+			return err
 		}
 		if err := validateHostKeyCheck("SSH connection "+conn.Name, conn.HostKeyCheck); err != nil {
 			return err
@@ -229,8 +235,8 @@ func (c *Config) Validate() error {
 			if tunnel.SSHUser == "" {
 				return fmt.Errorf("tunnel %s: ssh_user is required", tunnel.Name)
 			}
-			if tunnel.KeyFile == "" {
-				return fmt.Errorf("tunnel %s: key_file is required", tunnel.Name)
+			if err := validateAuth(tunnel.Name, tunnel.AuthMethod, tunnel.KeyFile); err != nil {
+				return err
 			}
 		}
 
@@ -290,6 +296,7 @@ func (c *Config) ParseTunnels() ([]ParsedTunnel, error) {
 	for _, tunnel := range c.Tunnels {
 		var sshHost, sshUser, keyFile string
 		var hostKeyCheck, knownHostsFile string
+		var authMethod, agentSocket string
 		var err error
 
 		// Resolve SSH configuration
@@ -303,7 +310,10 @@ func (c *Config) ParseTunnels() ([]ParsedTunnel, error) {
 			sshUser = conn.User
 			// 与 ResolveKeyPath 用同一套规则（环境变量 + ~ + 候选目录），
 			// 否则界面能解析的 ~ 路径在隧道启动时会被当成相对路径
-			keyFile = c.ResolveKeyPath(conn.KeyFile)
+			if conn.AuthMethod != "agent" {
+				keyFile = c.ResolveKeyPath(conn.KeyFile)
+			}
+			authMethod, agentSocket = conn.AuthMethod, conn.AgentSocket
 			hostKeyCheck = conn.HostKeyCheck
 			knownHostsFile = conn.KnownHostsFile
 		} else {
@@ -313,11 +323,18 @@ func (c *Config) ParseTunnels() ([]ParsedTunnel, error) {
 			}
 			sshHost = tunnel.SSHHost
 			sshUser = tunnel.SSHUser
-			keyFile = c.ResolveKeyPath(tunnel.KeyFile)
+			if tunnel.AuthMethod != "agent" {
+				keyFile = c.ResolveKeyPath(tunnel.KeyFile)
+			}
+			authMethod, agentSocket = tunnel.AuthMethod, tunnel.AgentSocket
 			hostKeyCheck = tunnel.HostKeyCheck
 			knownHostsFile = tunnel.KnownHostsFile
 		}
 
+		if authMethod == "" {
+			authMethod = "key"
+		}
+		agentSocket = expandHome(expandEnv(agentSocket))
 		if hostKeyCheck == "" {
 			hostKeyCheck = DefaultHostKeyCheck
 		}
@@ -364,6 +381,8 @@ func (c *Config) ParseTunnels() ([]ParsedTunnel, error) {
 			SSHHost:              sshHost,
 			SSHUser:              sshUser,
 			KeyFile:              keyFile,
+			AuthMethod:           authMethod,
+			AgentSocket:          agentSocket,
 			HostKeyCheck:         hostKeyCheck,
 			KnownHostsFile:       knownHostsFile,
 			ReconnectStrategy:    strategy,
@@ -375,7 +394,44 @@ func (c *Config) ParseTunnels() ([]ParsedTunnel, error) {
 	return parsed, nil
 }
 
-// validateHostKeyCheck 校验 host_key_check 取值，空串表示使用默认策略。
+// validateAuth validates the selected key source without reading private material.
+func validateAuth(owner, method, key string) error {
+	if method != "" && method != "key" && method != "agent" {
+		return fmt.Errorf("%s: auth_method must be key or agent", owner)
+	}
+	if method != "agent" && key == "" {
+		return fmt.Errorf("%s: key_file is required", owner)
+	}
+	return nil
+}
+
+func (c *Config) ParseSSHConnection(conn SSHConnection) (ParsedTunnel, error) {
+	probe := cloneConfig(c)
+	if conn.Name == "" {
+		conn.Name = "connection-test"
+	}
+	found := false
+	for i, existing := range probe.SSHConnections {
+		if existing.Name == conn.Name {
+			probe.SSHConnections[i] = conn
+			found = true
+			break
+		}
+	}
+	if !found {
+		probe.SSHConnections = append(probe.SSHConnections, conn)
+	}
+	probe.Tunnels = []Tunnel{{Name: "connection-test", SSHConnection: conn.Name, LocalPort: 1, RemoteHost: "127.0.0.1", RemotePort: 1}}
+	if err := probe.Validate(); err != nil {
+		return ParsedTunnel{}, err
+	}
+	parsed, err := probe.ParseTunnels()
+	if err != nil {
+		return ParsedTunnel{}, err
+	}
+	return parsed[0], nil
+}
+
 func validateHostKeyCheck(owner, value string) error {
 	switch value {
 	case "", HostKeyCheckKnownHosts, HostKeyCheckInsecure:

@@ -2,6 +2,20 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ssh_tunnel_client/models.dart';
 
 void main() {
+  test('agent 认证与密钥解锁状态保留', () {
+    final json = {
+      'name': 'agent',
+      'host': 'example:22',
+      'user': 'alice',
+      'key_file': '',
+      'auth_method': 'agent',
+      'agent_socket': 'fixture-agent',
+    };
+    expect(SshConnection.fromJson(json).toJson(), json);
+    final key = KeyInfo.fromJson({'encrypted': true, 'unlocked': true});
+    expect(key.encrypted, isTrue);
+    expect(key.unlocked, isTrue);
+  });
   test('复制配置保留分组、自动启动和认证字段，重置运行状态', () {
     final original = Tunnel.fromJson({
       'name': 'db',

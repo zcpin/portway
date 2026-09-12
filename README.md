@@ -172,6 +172,12 @@ ssh-keyscan example.com >> ~/.ssh/known_hosts
 
 也可以在 SSH 连接上设置 `known_hosts_file` 指定其它文件，或在可信网络中设置 `host_key_check = "insecure"` 关闭校验。
 
+SSH 连接和直连隧道编辑器均可选择私钥文件或 **SSH agent** 认证（`auth_method = "agent"`，可选 `agent_socket`）。Windows 默认连接 OpenSSH 的 `\\.\pipe\openssh-ssh-agent`，Linux/macOS 使用 `SSH_AUTH_SOCK`。daemon 必须能访问其运行身份下的 agent。
+
+带口令的私钥可在编辑器或「密钥」页解锁。口令只用于本次解锁，解析后的密钥保存在 daemon 内存；daemon 重启后需要再次解锁。锁定影响后续认证，已建立的连接继续运行，原私钥文件不会被改写。
+
+编辑器的「查看主机指纹」只探测主机公钥；确认信任后会再次核对指纹再写入指定 known_hosts，并启用校验。主机密钥变化时需要明确选择「替换并信任」，其他主机的信任记录会保留。
+
 ## 客户端托盘
 
 关闭窗口时会弹出确认（可在「设置」页改成默认直接收进托盘或直接退出），可选：
@@ -231,8 +237,12 @@ ssh-tunnel-daemon service <动作>       系统服务托管
 | POST | `/api/tunnels/{name}/restart` | 重启 |
 | GET/POST/PUT/DELETE | `/api/ssh-connections[/{name}]` | SSH 连接增删改查 |
 | POST | `/api/ssh-connections/test` | 测试待保存 SSH 配置，返回 `ok`、`elapsed_ms` 和错误 |
+| POST | `/api/ssh-connections/host-key` | 查看待保存连接的主机指纹，不发送认证凭据 |
+| POST | `/api/ssh-connections/trust` | 确认 `connection`、`fingerprint`，变更密钥需 `replace=true` |
 | GET | `/api/keys` | 配置中引用的私钥列表（含是否存在） |
 | GET | `/api/keys/stat?path=<路径>` | 校验私钥路径对 daemon 是否可读 |
+| POST | `/api/keys/unlock` | 使用 `path`、`passphrase` 解锁私钥，口令不保存 |
+| POST | `/api/keys/lock` | 锁定 `path` 对应的内存私钥 |
 | GET | `/api/logs` | 日志缓冲 |
 | GET | `/api/status` | 所有隧道的运行状态（`{名称: 是否运行}`） |
 | POST | `/api/reload` | 重新加载配置 |

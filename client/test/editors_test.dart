@@ -89,6 +89,50 @@ Future<void> _openEditor<T>(
 }
 
 void main() {
+  testWidgets('agent 连接可不填写私钥并保留 agent 地址', (tester) async {
+    SshConnection? saved;
+    await _openEditor<SshConnection>(
+      tester,
+      const ConnectionEditorDialog(
+        editing: SshConnection(
+          name: 'agent',
+          host: 'example:22',
+          user: 'alice',
+          keyFile: '',
+          authMethod: 'agent',
+          agentSocket: 'fixture-agent',
+        ),
+      ),
+      (value) => saved = value,
+    );
+    expect(find.widgetWithText(TextFormField, '私钥路径 *'), findsNothing);
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+    expect(saved?.authMethod, 'agent');
+    expect(saved?.agentSocket, 'fixture-agent');
+  });
+
+  testWidgets('agent 直连隧道可不填写私钥', (tester) async {
+    Tunnel? saved;
+    final original = Tunnel.fromJson({
+      'name': 'agent',
+      'local_port': 15432,
+      'remote_host': '127.0.0.1',
+      'remote_port': 5432,
+      'ssh_host': 'example:22',
+      'ssh_user': 'alice',
+      'auth_method': 'agent',
+      'agent_socket': 'fixture-agent',
+    });
+    await _openEditor<Tunnel>(
+      tester,
+      TunnelEditorDialog(editing: original),
+      (value) => saved = value,
+    );
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+    expect(saved?.toJson(), original.toJson());
+  });
   testWidgets('测试连接使用未保存的编辑值并展示结果', (tester) async {
     final client = _DiagnosticClient();
     addTearDown(client.close);

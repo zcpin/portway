@@ -33,6 +33,8 @@ type TunnelInfo struct {
 	SSHHost              string `json:"ssh_host"`
 	SSHUser              string `json:"ssh_user"`
 	KeyFile              string `json:"key_file,omitempty"`
+	AuthMethod           string `json:"auth_method,omitempty"`
+	AgentSocket          string `json:"agent_socket,omitempty"`
 	HostKeyCheck         string `json:"host_key_check,omitempty"`
 	KnownHostsFile       string `json:"known_hosts_file,omitempty"`
 	ReconnectStrategy    string `json:"reconnect_strategy"`
@@ -54,13 +56,15 @@ type LogEntry struct {
 // 私钥以本地文件路径的形式引用，不需要上传到任何目录，因此这里同时给出
 // 配置里填写的原始路径与实际解析出的路径，便于界面判断文件是否还在。
 type KeyInfo struct {
-	Name     string   `json:"name"`     // 文件名
-	Path     string   `json:"path"`     // 配置中填写的原始路径
-	Resolved string   `json:"resolved"` // 解析后的绝对路径
-	Exists   bool     `json:"exists"`   // 文件是否存在
-	Size     int64    `json:"size"`
-	Modified string   `json:"modified"`
-	UsedBy   []string `json:"used_by"` // 引用它的 SSH 连接或隧道名
+	Name      string   `json:"name"`     // 文件名
+	Path      string   `json:"path"`     // 配置中填写的原始路径
+	Resolved  string   `json:"resolved"` // 解析后的绝对路径
+	Exists    bool     `json:"exists"`   // 文件是否存在
+	Size      int64    `json:"size"`
+	Modified  string   `json:"modified"`
+	UsedBy    []string `json:"used_by"` // 引用它的 SSH 连接或隧道名
+	Encrypted bool     `json:"encrypted"`
+	Unlocked  bool     `json:"unlocked"`
 }
 
 // EventEmitter 把业务事件推送出去，具体实现由 server 层注入（WebSocket Hub）。
@@ -167,6 +171,8 @@ func (a *App) GetTunnels() []TunnelInfo {
 			SSHHost:              t.SSHHost,
 			SSHUser:              t.SSHUser,
 			KeyFile:              t.KeyFile,
+			AuthMethod:           t.AuthMethod,
+			AgentSocket:          t.AgentSocket,
 			HostKeyCheck:         t.HostKeyCheck,
 			KnownHostsFile:       t.KnownHostsFile,
 			ReconnectStrategy:    t.ReconnectStrategy,
@@ -217,20 +223,13 @@ func (a *App) GetSSHConnections() []config.SSHConnection {
 }
 
 func (a *App) TestSSHConnection(ctx context.Context, conn config.SSHConnection) (tunnel.Diagnostic, error) {
-	cfg := a.mgr.GetConfig()
-	conn.Name = "connection-test"
-	cfg.SSHConnections = []config.SSHConnection{conn}
-	cfg.Tunnels = []config.Tunnel{{Name: "connection-test", SSHConnection: conn.Name,
-		LocalPort: 1, RemoteHost: "127.0.0.1", RemotePort: 1}}
-	if err := cfg.Validate(); err != nil {
-		return tunnel.Diagnostic{}, err
-	}
-	parsed, err := cfg.ParseTunnels()
-	if err != nil {
-		return tunnel.Diagnostic{}, err
-	}
-	return tunnel.TestConnection(ctx, parsed[0]), nil
+	return a.mgr.TestSSHConnection(ctx, conn)
 }
+
+func (a *App) UnlockKey(path string, passphrase []byte) error {
+	return a.mgr.UnlockKey(path, passphrase)
+}
+func (a *App) LockKey(path string) { a.mgr.LockKey(path) }
 
 // GetGlobalSettings 返回全局配置项（日志级别、重连默认值）。
 func (a *App) GetGlobalSettings() config.GlobalSettings {
@@ -344,10 +343,14 @@ func (a *App) ListKeys() []KeyInfo {
 	}
 
 	for _, c := range cfg.SSHConnections {
-		add(c.KeyFile, c.Name)
+		if c.AuthMethod != "agent" {
+			add(c.KeyFile, c.Name)
+		}
 	}
 	for _, t := range cfg.Tunnels {
-		add(t.KeyFile, t.Name)
+		if t.SSHConnection == "" && t.AuthMethod != "agent" {
+			add(t.KeyFile, t.Name)
+		}
 	}
 
 	keys := make([]KeyInfo, 0, len(order))
@@ -365,6 +368,7 @@ func (a *App) ListKeys() []KeyInfo {
 			info.Exists = true
 			info.Size = st.Size()
 			info.Modified = st.ModTime().Format(time.RFC3339)
+			info.Encrypted, info.Unlocked = a.mgr.KeyStatus(resolved)
 		}
 		keys = append(keys, info)
 	}
@@ -395,14 +399,17 @@ func (a *App) StatKey(rawPath string) (KeyInfo, error) {
 	if st.IsDir() {
 		return KeyInfo{}, fmt.Errorf("这是一个目录，请选择私钥文件")
 	}
+	encrypted, unlocked := a.mgr.KeyStatus(resolved)
 
 	return KeyInfo{
-		Name:     filepath.Base(resolved),
-		Path:     rawPath,
-		Resolved: resolved,
-		Exists:   true,
-		Size:     st.Size(),
-		Modified: st.ModTime().Format(time.RFC3339),
+		Name:      filepath.Base(resolved),
+		Path:      rawPath,
+		Resolved:  resolved,
+		Exists:    true,
+		Size:      st.Size(),
+		Modified:  st.ModTime().Format(time.RFC3339),
+		Encrypted: encrypted,
+		Unlocked:  unlocked,
 	}, nil
 }
 

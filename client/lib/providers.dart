@@ -305,6 +305,19 @@ final sshConnectionsProvider =
 // ---------- 密钥 ----------
 
 class KeysNotifier extends AsyncNotifier<List<KeyInfo>> {
+  Future<void> unlock(String path, String passphrase) async {
+    final client = await ref.read(clientProvider.future);
+    if (client == null) throw StateError('未连接到 daemon');
+    await client.unlockKey(path, passphrase);
+    await refresh();
+  }
+
+  Future<void> lock(String path) async {
+    final client = await ref.read(clientProvider.future);
+    if (client == null) throw StateError('未连接到 daemon');
+    await client.lockKey(path);
+    await refresh();
+  }
   @override
   Future<List<KeyInfo>> build() async {
     final client = await ref.watch(clientProvider.future);

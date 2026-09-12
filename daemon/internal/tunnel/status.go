@@ -63,9 +63,9 @@ type Diagnostic struct {
 }
 
 // TestConnection performs one bounded SSH handshake without starting a forwarder.
-func TestConnection(ctx context.Context, cfg config.ParsedTunnel) Diagnostic {
+func TestConnection(ctx context.Context, cfg config.ParsedTunnel, keys ...*KeyStore) Diagnostic {
 	started := time.Now()
-	t, err := NewTunnel(cfg)
+	t, err := NewTunnel(cfg, keys...)
 	if err == nil {
 		ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 		defer cancel()
