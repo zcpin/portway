@@ -80,6 +80,10 @@ jobs:
           $p = Start-Process -FilePath $is -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" -WindowStyle Hidden -Wait -PassThru
           if ($p.ExitCode -ne 0) { Write-Error "Inno Setup install failed: $($p.ExitCode)"; exit $p.ExitCode }
 
+      - name: Test installer autostart cleanup
+        shell: pwsh
+        run: ./scripts/test_autostart_cleanup.ps1
+
       # 复用本地一键脚本：flutter build + go build + 拷入 daemon + Inno 打包 + 便携 zip。
       - name: Build daemon + client + installer + portable zip
         shell: cmd
@@ -270,6 +274,10 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
       - uses: actions/download-artifact@v4
         with:
           pattern: ssh-tunnel-*
@@ -281,14 +289,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           PRERELEASE: ${{ needs.version.outputs.prerelease }}
-        run: |
-          release_flags=(--prerelease="$PRERELEASE")
-          if [ "$PRERELEASE" = "true" ]; then
-            release_flags+=(--latest=false)
-          fi
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release edit "$GITHUB_REF_NAME" "${release_flags[@]}"
-            gh release upload "$GITHUB_REF_NAME" release-assets/* --clobber
-          else
-            gh release create "$GITHUB_REF_NAME" release-assets/* --verify-tag --generate-notes "${release_flags[@]}"
-          fi
+        run: bash scripts/publish_release.sh

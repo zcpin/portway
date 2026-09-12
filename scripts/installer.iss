@@ -11,6 +11,9 @@
 #ifndef AppBuildNumber
   #define AppBuildNumber "1"
 #endif
+#ifndef AppBundleDir
+  #define AppBundleDir "..\client\build\windows\x64\runner\Release"
+#endif
 
 #define MyAppName "SSH 隧道管理器"
 #define MyAppExe "ssh_tunnel_client.exe"
@@ -44,7 +47,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
 ; 发布目录包含：客户端 exe、Flutter 运行库 data\、daemon exe、示例配置。
-Source: "..\client\build\windows\x64\runner\Release\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#AppBundleDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExe}"
@@ -55,3 +58,12 @@ Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: 
 
 [Run]
 Filename: "{app}\{#MyAppExe}"; Description: "启动 {#MyAppName}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+#include "autostart_cleanup.iss"
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usUninstall then
+    RemoveInstalledAutostart(ExpandConstant('{app}\{#MyAppDaemon}'));
+end;

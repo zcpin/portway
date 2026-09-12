@@ -372,6 +372,8 @@ class _ConnectionEditorState extends ConsumerState<ConnectionEditorDialog> {
         host: _host.text.trim(),
         user: _user.text.trim(),
         keyFile: _keyFile.text.trim(),
+        hostKeyCheck: widget.editing?.hostKeyCheck ?? '',
+        knownHostsFile: widget.editing?.knownHostsFile ?? '',
       ),
     );
   }

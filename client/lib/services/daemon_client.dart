@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -14,13 +15,16 @@ const _reconnectDelay = Duration(seconds: 2);
 class DaemonClient {
   final DaemonInfo info;
   final Dio _dio;
+  final Duration _connectTimeout;
   WebSocket? _socket;
+  HttpClient? _connectingClient;
   bool _closed = false;
 
   /// [connectTimeout] 供服务发现阶段使用：遍历多个候选位置时，
   /// 指向已退出进程的陈旧条目应当很快失败，而不是每个都等满默认超时。
   DaemonClient(this.info, {Duration connectTimeout = const Duration(seconds: 5)})
-      : _dio = Dio(BaseOptions(
+      : _connectTimeout = connectTimeout,
+        _dio = Dio(BaseOptions(
           baseUrl: info.httpBase,
           connectTimeout: connectTimeout,
           receiveTimeout: const Duration(seconds: 10),
@@ -125,14 +129,30 @@ class DaemonClient {
 
   /// 连接 WebSocket 事件流，断线后自动重连，直到 [close] 被调用。
   ///
-  /// 事件格式：{"type":"status","status":{...}} 或 {"type":"log","log":{...}}
+  /// 事件格式：{"type":"snapshot","snapshot":[...]}，以及 status / log 事件。
   Stream<Map<String, dynamic>> events() async* {
     while (!_closed) {
+      final connector = HttpClient()..connectionTimeout = _connectTimeout;
+      _connectingClient = connector;
+      WebSocket? socket;
+      var acceptingConnection = true;
       try {
-        final socket = await WebSocket.connect(
+        socket = await WebSocket.connect(
           '$wsBase/ws',
           headers: info.token.isNotEmpty ? {'X-Auth-Token': info.token} : null,
-        );
+          customClient: connector,
+        ).then((connected) {
+          // 超时或 close 之后才完成的升级，也必须关闭得到的 socket。
+          if (_closed || !acceptingConnection) {
+            unawaited(_closeSocket(connected));
+          }
+          return connected;
+        }).timeout(_connectTimeout, onTimeout: () {
+          acceptingConnection = false;
+          connector.close(force: true);
+          throw TimeoutException('WebSocket handshake timed out');
+        });
+        if (_closed) return;
         _socket = socket;
 
         await for (final data in socket) {
@@ -141,7 +161,13 @@ class DaemonClient {
           if (event != null) yield event;
         }
       } catch (_) {
-        // 连接失败或中途断开：等待后重试；token 过期由上调的探活触发重新发现
+        // 连接失败或中途断开：等待后重试；token 过期由上层的探活触发重新发现
+      } finally {
+        acceptingConnection = false;
+        if (identical(_connectingClient, connector)) _connectingClient = null;
+        connector.close(force: true);
+        if (identical(_socket, socket)) _socket = null;
+        if (socket != null) unawaited(_closeSocket(socket));
       }
 
       if (_closed) return;
@@ -152,10 +178,22 @@ class DaemonClient {
   String get wsBase => info.wsBase;
 
   void close() {
+    if (_closed) return;
     _closed = true;
-    _socket?.close();
+    _connectingClient?.close(force: true);
+    _connectingClient = null;
+    final socket = _socket;
+    if (socket != null) unawaited(_closeSocket(socket));
     _socket = null;
     _dio.close(force: true);
+  }
+
+  static Future<void> _closeSocket(WebSocket socket) async {
+    try {
+      await socket.close();
+    } catch (_) {
+      // 对端已经断开时，清理连接仍视为完成。
+    }
   }
 
   Future<void> _post(String path, Object? data) async {

@@ -187,7 +187,7 @@ class TunnelCard extends ConsumerWidget {
                 InfoField(
                   label: '重连',
                   value:
-                      '${tunnel.reconnectStrategy == 'exponential' ? '指数退避' : '固定间隔'} / ${tunnel.reconnectInterval}',
+                      '${tunnel.reconnectStrategy.isEmpty ? '全局策略' : tunnel.reconnectStrategy == 'exponential' ? '指数退避' : '固定间隔'} / ${tunnel.reconnectInterval.isEmpty ? '全局间隔' : tunnel.reconnectInterval}',
                 ),
               ],
             ),
@@ -246,11 +246,12 @@ class _TunnelEditorState extends ConsumerState<TunnelEditorDialog> {
   late final TextEditingController _remotePort;
   late final TextEditingController _sshHost;
   late final TextEditingController _sshUser;
+  late final TextEditingController _keyFile;
   late final TextEditingController _interval;
   late final TextEditingController _maxAttempts;
 
   String? _sshConnection;
-  String _strategy = 'fixed';
+  String _strategy = '';
 
   bool get _isEditing => widget.editing != null;
 
@@ -266,12 +267,13 @@ class _TunnelEditorState extends ConsumerState<TunnelEditorDialog> {
         text: t != null && t.remotePort > 0 ? '${t.remotePort}' : '');
     _sshHost = TextEditingController(text: t?.sshHost ?? '');
     _sshUser = TextEditingController(text: t?.sshUser ?? '');
-    _interval = TextEditingController(text: t?.reconnectInterval ?? '5s');
+    _keyFile = TextEditingController(text: t?.keyFile ?? '');
+    _interval = TextEditingController(text: t?.reconnectInterval ?? '');
     _maxAttempts =
         TextEditingController(text: t != null ? '${t.maxReconnectAttempts}' : '0');
     _sshConnection =
         (t?.sshConnection.isNotEmpty ?? false) ? t!.sshConnection : null;
-    _strategy = t?.reconnectStrategy ?? 'fixed';
+    _strategy = t?.reconnectStrategy ?? '';
   }
 
   @override
@@ -283,6 +285,7 @@ class _TunnelEditorState extends ConsumerState<TunnelEditorDialog> {
       _remotePort,
       _sshHost,
       _sshUser,
+      _keyFile,
       _interval,
       _maxAttempts,
     ]) {
@@ -375,6 +378,8 @@ class _TunnelEditorState extends ConsumerState<TunnelEditorDialog> {
                           controller: _sshHost,
                           decoration: const InputDecoration(
                               labelText: 'SSH 主机（host:port）*'),
+                          validator: (v) =>
+                              (v == null || v.trim().isEmpty) ? '请填写 SSH 主机' : null,
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -383,9 +388,18 @@ class _TunnelEditorState extends ConsumerState<TunnelEditorDialog> {
                           controller: _sshUser,
                           decoration:
                               const InputDecoration(labelText: 'SSH 用户 *'),
+                          validator: (v) =>
+                              (v == null || v.trim().isEmpty) ? '请填写 SSH 用户' : null,
                         ),
                       ),
                     ],
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _keyFile,
+                    decoration: const InputDecoration(labelText: '私钥路径 *'),
+                    validator: (v) =>
+                        (v == null || v.trim().isEmpty) ? '请填写私钥路径' : null,
                   ),
                 ],
                 const SizedBox(height: 12),
@@ -397,12 +411,14 @@ class _TunnelEditorState extends ConsumerState<TunnelEditorDialog> {
                         decoration: const InputDecoration(labelText: '重连策略'),
                         items: const [
                           DropdownMenuItem(
+                              value: '', child: Text('跟随全局设置')),
+                          DropdownMenuItem(
                               value: 'fixed', child: Text('固定间隔')),
                           DropdownMenuItem(
                               value: 'exponential', child: Text('指数退避')),
                         ],
                         onChanged: (v) =>
-                            setState(() => _strategy = v ?? 'fixed'),
+                            setState(() => _strategy = v ?? ''),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -410,7 +426,7 @@ class _TunnelEditorState extends ConsumerState<TunnelEditorDialog> {
                       child: TextFormField(
                         controller: _interval,
                         decoration:
-                            const InputDecoration(labelText: '重连间隔（如 5s）'),
+                            const InputDecoration(labelText: '重连间隔（留空跟随全局）'),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -418,7 +434,7 @@ class _TunnelEditorState extends ConsumerState<TunnelEditorDialog> {
                       child: TextFormField(
                         controller: _maxAttempts,
                         decoration:
-                            const InputDecoration(labelText: '最大次数（0=无限）'),
+                            const InputDecoration(labelText: '最大次数（0=跟随全局）'),
                         keyboardType: TextInputType.number,
                       ),
                     ),
@@ -449,9 +465,11 @@ class _TunnelEditorState extends ConsumerState<TunnelEditorDialog> {
       sshConnection: _sshConnection ?? '',
       sshHost: _sshConnection == null ? _sshHost.text.trim() : '',
       sshUser: _sshConnection == null ? _sshUser.text.trim() : '',
+      keyFile: _sshConnection == null ? _keyFile.text.trim() : '',
+      hostKeyCheck: widget.editing?.hostKeyCheck ?? '',
+      knownHostsFile: widget.editing?.knownHostsFile ?? '',
       reconnectStrategy: _strategy,
-      reconnectInterval:
-          _interval.text.trim().isEmpty ? '5s' : _interval.text.trim(),
+      reconnectInterval: _interval.text.trim(),
       maxReconnectAttempts: int.tryParse(_maxAttempts.text.trim()) ?? 0,
       isRunning: widget.editing?.isRunning ?? false,
     );

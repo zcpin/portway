@@ -27,6 +27,9 @@ type TunnelInfo struct {
 	SSHConnection        string `json:"ssh_connection"`
 	SSHHost              string `json:"ssh_host"`
 	SSHUser              string `json:"ssh_user"`
+	KeyFile              string `json:"key_file,omitempty"`
+	HostKeyCheck         string `json:"host_key_check,omitempty"`
+	KnownHostsFile       string `json:"known_hosts_file,omitempty"`
 	ReconnectStrategy    string `json:"reconnect_strategy"`
 	ReconnectInterval    string `json:"reconnect_interval"`
 	MaxReconnectAttempts int    `json:"max_reconnect_attempts"`
@@ -66,6 +69,7 @@ type App struct {
 	configPath string
 	logBuffer  []LogEntry
 	logMu      sync.RWMutex
+	statusMu   sync.Mutex // 快照与状态事件按生成顺序入队。
 	emitMu     sync.RWMutex
 	emitter    EventEmitter
 	stopOnce   sync.Once
@@ -155,6 +159,9 @@ func (a *App) GetTunnels() []TunnelInfo {
 			SSHConnection:        t.SSHConnection,
 			SSHHost:              t.SSHHost,
 			SSHUser:              t.SSHUser,
+			KeyFile:              t.KeyFile,
+			HostKeyCheck:         t.HostKeyCheck,
+			KnownHostsFile:       t.KnownHostsFile,
 			ReconnectStrategy:    t.ReconnectStrategy,
 			ReconnectInterval:    t.ReconnectInterval,
 			MaxReconnectAttempts: t.MaxReconnectAttempts,
@@ -212,27 +219,39 @@ func (a *App) SetGlobalSettings(s config.GlobalSettings) error {
 	if err := a.mgr.SetGlobalSettings(s); err != nil {
 		return err
 	}
-	a.emitStatus()
+	a.emitSnapshot()
 	return nil
 }
 
 func (a *App) AddSSHConnection(conn config.SSHConnection) error {
-	return a.mgr.AddSSHConnection(conn)
+	if err := a.mgr.AddSSHConnection(conn); err != nil {
+		return err
+	}
+	a.emitSnapshot()
+	return nil
 }
 
 func (a *App) UpdateSSHConnection(name string, conn config.SSHConnection) error {
-	return a.mgr.UpdateSSHConnection(name, conn)
+	if err := a.mgr.UpdateSSHConnection(name, conn); err != nil {
+		return err
+	}
+	a.emitSnapshot()
+	return nil
 }
 
 func (a *App) DeleteSSHConnection(name string) error {
-	return a.mgr.DeleteSSHConnection(name)
+	if err := a.mgr.DeleteSSHConnection(name); err != nil {
+		return err
+	}
+	a.emitSnapshot()
+	return nil
 }
 
 func (a *App) AddTunnel(tunnel config.Tunnel) error {
 	if err := a.mgr.AddTunnel(tunnel); err != nil {
 		return err
 	}
-	a.emitStatus()
+	a.emitSnapshot()
 	return nil
 }
 
@@ -240,7 +259,7 @@ func (a *App) UpdateTunnel(name string, tunnel config.Tunnel) error {
 	if err := a.mgr.UpdateTunnel(name, tunnel); err != nil {
 		return err
 	}
-	a.emitStatus()
+	a.emitSnapshot()
 	return nil
 }
 
@@ -248,7 +267,7 @@ func (a *App) DeleteTunnel(name string) error {
 	if err := a.mgr.DeleteTunnel(name); err != nil {
 		return err
 	}
-	a.emitStatus()
+	a.emitSnapshot()
 	return nil
 }
 
@@ -257,7 +276,7 @@ func (a *App) ReloadConfig() error {
 	if err := a.mgr.Reload(a.configPath); err != nil {
 		return err
 	}
-	a.emitStatus()
+	a.emitSnapshot()
 	return nil
 }
 
@@ -410,22 +429,46 @@ func (a *App) broadcastStatus() {
 		case <-a.stopChan:
 			return
 		case <-ticker.C:
+			a.statusMu.Lock()
 			status := a.mgr.GetStatus()
-			if statusEqual(status, last) {
-				continue
+			if !statusEqual(status, last) {
+				last = cloneStatus(status)
+				if e := a.getEmitter(); e != nil {
+					e.Emit("status", status)
+				}
 			}
-			last = cloneStatus(status)
-			if e := a.getEmitter(); e != nil {
-				e.Emit("status", status)
-			}
+			a.statusMu.Unlock()
 		}
 	}
 }
 
 func (a *App) emitStatus() {
+	a.statusMu.Lock()
+	defer a.statusMu.Unlock()
 	if e := a.getEmitter(); e != nil {
 		e.Emit("status", a.mgr.GetStatus())
 	}
+}
+
+// SendSnapshot 给新连接发送完整列表，随后保留 status 事件供旧客户端使用。
+// 生成和入队与其他状态事件串行，避免初始快照覆盖更新的推送。
+func (a *App) SendSnapshot(target EventEmitter) {
+	if target == nil {
+		return
+	}
+	a.statusMu.Lock()
+	defer a.statusMu.Unlock()
+	tunnels := a.GetTunnels()
+	status := make(map[string]bool, len(tunnels))
+	for _, tunnel := range tunnels {
+		status[tunnel.Name] = tunnel.IsRunning
+	}
+	target.Emit("snapshot", tunnels)
+	target.Emit("status", status)
+}
+
+func (a *App) emitSnapshot() {
+	a.SendSnapshot(a.getEmitter())
 }
 
 func statusEqual(a, b map[string]bool) bool {

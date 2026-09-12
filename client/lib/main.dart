@@ -221,6 +221,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WindowListener {
     ref.listen(eventStreamProvider, (previous, next) {
       next.whenData((event) {
         switch (event['type']) {
+          case 'snapshot':
+            final snapshot = event['snapshot'];
+            if (snapshot is List) {
+              ref.read(tunnelsProvider.notifier).applySnapshot([
+                for (final row in snapshot)
+                  Tunnel.fromJson((row as Map).cast<String, dynamic>()),
+              ]);
+            }
           case 'status':
             final status = event['status'];
             if (status is Map) {

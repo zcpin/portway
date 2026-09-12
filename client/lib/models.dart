@@ -9,6 +9,9 @@ class Tunnel {
   final String sshConnection;
   final String sshHost;
   final String sshUser;
+  final String keyFile;
+  final String hostKeyCheck;
+  final String knownHostsFile;
   final String reconnectStrategy;
   final String reconnectInterval;
   final int maxReconnectAttempts;
@@ -22,6 +25,9 @@ class Tunnel {
     required this.sshConnection,
     required this.sshHost,
     required this.sshUser,
+    this.keyFile = '',
+    this.hostKeyCheck = '',
+    this.knownHostsFile = '',
     required this.reconnectStrategy,
     required this.reconnectInterval,
     required this.maxReconnectAttempts,
@@ -36,8 +42,11 @@ class Tunnel {
         sshConnection: j['ssh_connection'] as String? ?? '',
         sshHost: j['ssh_host'] as String? ?? '',
         sshUser: j['ssh_user'] as String? ?? '',
-        reconnectStrategy: j['reconnect_strategy'] as String? ?? 'fixed',
-        reconnectInterval: j['reconnect_interval'] as String? ?? '5s',
+        keyFile: j['key_file'] as String? ?? '',
+        hostKeyCheck: j['host_key_check'] as String? ?? '',
+        knownHostsFile: j['known_hosts_file'] as String? ?? '',
+        reconnectStrategy: j['reconnect_strategy'] as String? ?? '',
+        reconnectInterval: j['reconnect_interval'] as String? ?? '',
         maxReconnectAttempts: _asInt(j['max_reconnect_attempts']),
         isRunning: j['is_running'] as bool? ?? false,
       );
@@ -50,6 +59,9 @@ class Tunnel {
         if (sshConnection.isNotEmpty) 'ssh_connection': sshConnection,
         if (sshHost.isNotEmpty) 'ssh_host': sshHost,
         if (sshUser.isNotEmpty) 'ssh_user': sshUser,
+        if (keyFile.isNotEmpty) 'key_file': keyFile,
+        if (hostKeyCheck.isNotEmpty) 'host_key_check': hostKeyCheck,
+        if (knownHostsFile.isNotEmpty) 'known_hosts_file': knownHostsFile,
         'reconnect_strategy': reconnectStrategy,
         'reconnect_interval': reconnectInterval,
         'max_reconnect_attempts': maxReconnectAttempts,
@@ -63,6 +75,9 @@ class Tunnel {
         sshConnection: sshConnection,
         sshHost: sshHost,
         sshUser: sshUser,
+        keyFile: keyFile,
+        hostKeyCheck: hostKeyCheck,
+        knownHostsFile: knownHostsFile,
         reconnectStrategy: reconnectStrategy,
         reconnectInterval: reconnectInterval,
         maxReconnectAttempts: maxReconnectAttempts,
@@ -76,12 +91,16 @@ class SshConnection {
   final String host;
   final String user;
   final String keyFile;
+  final String hostKeyCheck;
+  final String knownHostsFile;
 
   const SshConnection({
     required this.name,
     required this.host,
     required this.user,
     required this.keyFile,
+    this.hostKeyCheck = '',
+    this.knownHostsFile = '',
   });
 
   factory SshConnection.fromJson(Map<String, dynamic> j) => SshConnection(
@@ -89,6 +108,8 @@ class SshConnection {
         host: j['host'] as String? ?? '',
         user: j['user'] as String? ?? '',
         keyFile: j['key_file'] as String? ?? '',
+        hostKeyCheck: j['host_key_check'] as String? ?? '',
+        knownHostsFile: j['known_hosts_file'] as String? ?? '',
       );
 
   Map<String, dynamic> toJson() => {
@@ -96,6 +117,8 @@ class SshConnection {
         'host': host,
         'user': user,
         'key_file': keyFile,
+        if (hostKeyCheck.isNotEmpty) 'host_key_check': hostKeyCheck,
+        if (knownHostsFile.isNotEmpty) 'known_hosts_file': knownHostsFile,
       };
 }
 
@@ -211,8 +234,8 @@ class DaemonInfo {
   /// 运行方式的中文描述，用于界面提示。
   String get sourceLabel => isShared ? '系统服务' : '用户进程';
 
-  String get httpBase => 'http://$host:$port';
-  String get wsBase => 'ws://$host:$port';
+  String get httpBase => Uri(scheme: 'http', host: host, port: port).toString();
+  String get wsBase => Uri(scheme: 'ws', host: host, port: port).toString();
 }
 
 /// daemon 的全局配置项（日志级别、重连默认值），对应 GET/PUT /api/config。

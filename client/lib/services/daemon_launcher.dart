@@ -113,11 +113,14 @@ class DaemonLauncher {
   static Future<bool> _anyDaemonHealthy() async {
     final candidates = await DaemonDiscovery.loadAll();
     for (final candidate in candidates) {
-      final probe = DaemonClient(candidate.info, connectTimeout: _probeTimeout);
+      DaemonClient? probe;
       try {
-        if (await probe.ping()) return true;
+        probe = DaemonClient(candidate.info, connectTimeout: _probeTimeout);
+        if (await probe.checkAuth()) return true;
+      } catch (_) {
+        // 跳过不可用的候选地址。
       } finally {
-        probe.close();
+        probe?.close();
       }
     }
     return false;

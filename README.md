@@ -79,7 +79,7 @@ ssh-tunnel-daemon service uninstall
 | 崩溃自动重启 | 否 | 是 |
 | 服务发现文件 | `~/.ssh-tunnel/daemon.json` | 系统公共目录（Windows 为 `%ProgramData%\ssh-tunnel`） |
 
-> 两种方式的运行身份不同，服务发现文件也会写到不同位置。客户端会**依次检查全部候选位置并逐个探活**，取第一个真正有响应的，因此无论用哪种方式都能自动连上，也能跳过 daemon 被强制结束后残留的陈旧文件。
+> 两种方式的运行身份不同，服务发现文件也会写到不同位置。客户端会**依次检查全部候选位置并校验 token**，取第一个通过认证的实例；地址无效、进程已退出或 token 已过期的条目都会被跳过。
 
 daemon 启动后会把连接信息写到发现文件：
 
@@ -94,7 +94,7 @@ daemon 启动后会把连接信息写到发现文件：
 }
 ```
 
-端口默认由系统分配（`-addr 127.0.0.1:0`），避免多实例冲突；token 每次启动重新生成。客户端读取该文件完成自动连接，无需手工配置。
+端口默认由系统分配（`-addr 127.0.0.1:0`），避免多实例冲突；token 每次启动重新生成。客户端读取该文件完成自动连接，无需手工配置，也支持 IPv6 回环地址（如 `-addr [::1]:0`）。
 
 **服务发现的候选位置**（按优先级）：
 
@@ -124,10 +124,13 @@ flutter run -d windows        # 或 macos / linux
 `ssh-tunnel-daemon.exe`（发布版已随程序分发），客户端会**自动拉起它**并等待就绪；
 仅用 `flutter run` 调试时，会自动向上查找源码仓库里的 `daemon/bin/ssh-tunnel-daemon.exe`。
 拉起后 daemon 独立常驻：关闭或退出客户端都不影响隧道。
+WebSocket 连接恢复后，客户端会自动同步完整隧道列表与运行状态，包括离线期间的增删改。
 
 ### 3. 配置隧道
 
 复制 `daemon/ssh-tunnel.example.toml` 为 `ssh-tunnel.toml`，或在客户端界面中添加 SSH 连接与隧道。
+
+隧道可引用已有 SSH 连接，也可手动填写 SSH 主机、用户和私钥路径。编辑已有配置时会保留 `host_key_check`、`known_hosts_file` 和私钥路径；重连策略可选择「跟随全局设置」，重连间隔留空也会保留全局继承。
 
 ## 典型场景：本地连远端 MySQL
 
@@ -238,6 +241,8 @@ WebSocket 事件格式：
 {"type": "log", "log": {"timestamp": "...", "level": "info", "message": "...", "tunnel": "mysql-prod"}}
 ```
 
+每次连接或重连 `/ws` 时，daemon 会主动发送 `snapshot` 事件，其 `snapshot` 字段与 `/api/tunnels` 的完整列表格式相同（没有隧道时为 `[]`），随后发送兼容旧客户端的 `status` 事件。配置增删改及重新加载也会推送快照；周期状态广播仍只在状态变化时发送。
+
 调试事件推送可用：
 
 ```bash
@@ -272,11 +277,17 @@ dart analyze
 flutter test
 ```
 
-每次 push / PR 会由 `.github/workflows/ci.yml` 执行以上检查（Go 侧含 `gofmt` 校验与 `-race` 测试），以及发布版本解析脚本的测试。脚本测试也可在仓库根目录运行：
+每次 push / PR 会由 `.github/workflows/ci.yml` 执行以上检查（Go 侧含 `gofmt` 校验与 `-race` 测试），以及发布版本解析和 Release 发布逻辑的测试。脚本测试也可在仓库根目录运行：
 
 ```powershell
 pwsh -NoProfile -File scripts/test_release_version.ps1
 ```
+
+```bash
+bash scripts/test_release_publish.sh
+```
+
+Windows 发布任务还会编译安装器并测试自启动路径匹配。安装 Inno Setup 6 后，可运行 `pwsh -NoProfile -File scripts/test_autostart_cleanup.ps1`；该测试使用临时载荷，不执行产品安装或卸载，也不修改自启动注册表。
 
 ## 打包安装包（Windows）
 
@@ -316,6 +327,8 @@ git push origin v1.2.3
 
 带预发布段的标签（如 `-rc.1`、`-beta`）会标记为 GitHub Pre-release，并且不会设为 Latest；重跑已有版本时也会同步该标记。仅构建元数据包含连字符（如 `v1.2.3+build-rc.1`）的版本仍按正式版处理。
 
+已有草稿 Release 会在全部附件上传成功后正式发布，并检查其已退出草稿状态；附件上传失败时保留草稿，便于修复后重跑。
+
 各平台产物：
 
 | 平台 | 产物 |
@@ -331,7 +344,7 @@ Linux 便携版需要系统提供 GTK 3 与 Ayatana AppIndicator（或 AppIndica
 
 安装程序为**按用户安装**（无需管理员权限），安装到
 `%LOCALAPPDATA%\Programs\SSH Tunnel Manager`，创建开始菜单与桌面快捷方式。
-配置与服务发现文件仍写在用户目录 `~/.ssh-tunnel/`，卸载不会残留。
+卸载时会移除指向本安装目录的用户级自启动项；指向其他安装目录的条目会保留。用户目录 `~/.ssh-tunnel/` 中的配置与服务发现文件会保留。
 
 需要管理员级（Program Files）安装时，把 `installer.iss` 里的
 `PrivilegesRequired=lowest` 改为 `admin`、`DefaultDirName` 改为 `{autopf}\SSH Tunnel Manager` 即可。

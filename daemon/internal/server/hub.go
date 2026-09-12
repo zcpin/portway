@@ -40,6 +40,21 @@ func (c *client) closeDone() {
 type Hub struct {
 	mu    sync.RWMutex
 	conns map[*client]struct{}
+	// Server 在开始处理请求前安装快照回调，调用时不持有 Hub 锁。
+	onConnect func(*client)
+}
+
+// clientEvents 把初始快照送入指定连接，沿用广播的非阻塞发送和清理规则。
+type clientEvents struct {
+	hub    *Hub
+	client *client
+}
+
+func (e clientEvents) Emit(event string, data interface{}) {
+	payload := marshalEvent(event, data)
+	if payload != nil {
+		e.hub.send(e.client, payload)
+	}
 }
 
 func NewHub() *Hub {
@@ -48,12 +63,8 @@ func NewHub() *Hub {
 
 // Emit 推送一条事件，格式为 {"type":"<event>","<event>":<data>}。
 func (h *Hub) Emit(event string, data interface{}) {
-	payload, err := json.Marshal(map[string]interface{}{
-		"type": event,
-		event:  data,
-	})
-	if err != nil {
-		logger.Error("failed to marshal event %s: %v", event, err)
+	payload := marshalEvent(event, data)
+	if payload == nil {
 		return
 	}
 
@@ -65,17 +76,35 @@ func (h *Hub) Emit(event string, data interface{}) {
 	h.mu.RUnlock()
 
 	for _, c := range clients {
-		select {
-		case c.send <- payload:
-		default:
-			// 慢客户端：断开而不是阻塞广播。
-			// 用 CloseNow 立即断开：Close 会等待关闭握手（最长 5 秒），
-			// 那会把 Emit 的调用方重新拖住
-			h.remove(c)
-			_ = c.conn.CloseNow()
-			// 日志钩子会再次调用 Emit，必须先移除满队列的连接。
-			logger.Debug("websocket client too slow, dropping connection")
-		}
+		h.send(c, payload)
+	}
+}
+
+func marshalEvent(event string, data interface{}) []byte {
+	payload, err := json.Marshal(map[string]interface{}{
+		"type": event,
+		event:  data,
+	})
+	if err != nil {
+		logger.Error("failed to marshal event %s: %v", event, err)
+		return nil
+	}
+	return payload
+}
+
+func (h *Hub) send(c *client, payload []byte) {
+	select {
+	case <-c.done:
+		return
+	default:
+	}
+	select {
+	case c.send <- payload:
+	default:
+		// 先移除连接再记录日志，避免日志钩子重复进入满队列。
+		h.remove(c)
+		_ = c.conn.CloseNow()
+		logger.Debug("websocket client too slow, dropping connection")
 	}
 }
 
@@ -113,6 +142,9 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// 写循环：唯一对该连接执行 Write 的 goroutine
 	go h.writeLoop(c)
+	if h.onConnect != nil {
+		h.onConnect(c)
+	}
 
 	// ping 循环：探测僵死连接
 	go func() {

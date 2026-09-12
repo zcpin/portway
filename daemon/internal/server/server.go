@@ -29,6 +29,9 @@ type Server struct {
 
 // New 创建 Server，token 为空表示关闭认证（仅限回环地址下使用）。
 func New(a *app.App, hub *Hub, addr, token string) *Server {
+	hub.onConnect = func(c *client) {
+		a.SendSnapshot(clientEvents{hub: hub, client: c})
+	}
 	s := &Server{
 		app:   a,
 		hub:   hub,

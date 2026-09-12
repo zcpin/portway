@@ -2,10 +2,10 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../models.dart';
-import '../services/daemon_client.dart';
-import '../services/daemon_discovery.dart';
-import '../services/daemon_launcher.dart';
+import 'models.dart';
+import 'services/daemon_client.dart';
+import 'services/daemon_discovery.dart';
+import 'services/daemon_launcher.dart';
 
 /// riverpod 3 移除了 AsyncValue.valueOrNull，这里补一个等价实现，
 /// 便于在 loading / error 状态下安全取值。
@@ -25,8 +25,8 @@ final discoveryProvider = FutureProvider<List<DaemonCandidate>>((ref) async {
 
 /// 已连通的 daemon 客户端；daemon 未运行时为 null。
 ///
-/// 候选位置按优先级逐个探活，取第一个真正有响应的：
-/// 陈旧文件（daemon 被强制结束后残留）指向的端口不会有响应，会被跳过，
+/// 候选位置按优先级逐个探活并鉴权，取第一个 token 有效的：
+/// 陈旧文件指向的端口无响应或 token 已过期时会被跳过，
 /// 从而不会挡住后面真正在运行的那个 daemon。
 ///
 /// 如果没有任何候选可用，会尝试自动拉起随客户端打包的本地 daemon
@@ -85,14 +85,17 @@ final clientProvider = FutureProvider<DaemonClient?>((ref) async {
   return client;
 });
 
-/// 按优先级逐个探活候选位置，返回第一个真正有响应的客户端；都无响应时返回 null。
+/// 按优先级逐个探活候选位置，返回第一个通过鉴权的客户端；都不可用时返回 null。
 Future<DaemonClient?> _probeCandidates(List<DaemonCandidate> candidates) async {
   for (final candidate in candidates) {
-    final probe = DaemonClient(candidate.info, connectTimeout: _probeTimeout);
+    DaemonClient? probe;
     try {
-      if (await probe.ping()) return DaemonClient(candidate.info);
+      probe = DaemonClient(candidate.info, connectTimeout: _probeTimeout);
+      if (await probe.checkAuth()) return DaemonClient(candidate.info);
+    } catch (_) {
+      // 单个发现文件的地址无效时，继续尝试后面的候选。
     } finally {
-      probe.close();
+      probe?.close();
     }
   }
   return null;
@@ -143,7 +146,7 @@ final globalSettingsProvider =
     AsyncNotifierProvider<GlobalSettingsNotifier, GlobalSettings>(
         GlobalSettingsNotifier.new);
 
-/// daemon 推送的事件流（状态变化、日志）。
+/// daemon 推送的事件流（完整快照、状态变化、日志）。
 final eventStreamProvider = StreamProvider<Map<String, dynamic>>((ref) async* {
   final client = await ref.watch(clientProvider.future);
   if (client == null) return;
@@ -153,11 +156,33 @@ final eventStreamProvider = StreamProvider<Map<String, dynamic>>((ref) async* {
 // ---------- 隧道 ----------
 
 class TunnelsNotifier extends AsyncNotifier<List<Tunnel>> {
+  int _pushRevision = 0;
+  List<Tunnel> _lastPush = const [];
+
+  /// 连接恢复时接收完整快照，补齐离线期间新增、移除及状态改变的隧道。
+  void applySnapshot(List<Tunnel> tunnels) {
+    _pushRevision++;
+    _lastPush = tunnels;
+    state = AsyncData(tunnels);
+  }
+
   @override
   Future<List<Tunnel>> build() async {
     final client = await ref.watch(clientProvider.future);
     if (client == null) return [];
-    return client.getTunnels();
+    return _loadTunnels(client);
+  }
+
+  Future<List<Tunnel>> _loadTunnels(DaemonClient client) async {
+    final revision = _pushRevision;
+    try {
+      final tunnels = await client.getTunnels();
+      // 请求期间收到的推送优先，避免迟到的 HTTP 结果恢复旧行或旧状态。
+      return revision == _pushRevision ? tunnels : _lastPush;
+    } catch (_) {
+      if (revision != _pushRevision) return _lastPush;
+      rethrow;
+    }
   }
 
   Future<void> refresh() async {
@@ -167,14 +192,14 @@ class TunnelsNotifier extends AsyncNotifier<List<Tunnel>> {
       return;
     }
     state = const AsyncLoading();
-    state = await AsyncValue.guard(client.getTunnels);
+    state = await AsyncValue.guard(() => _loadTunnels(client));
   }
 
   /// 应用 WebSocket 推送的状态，避免整表刷新造成闪烁。
   void applyStatus(Map<String, dynamic> status) {
     final current = state.valueOrNull;
     if (current == null) return;
-    state = AsyncData([
+    applySnapshot([
       for (final t in current)
         t.copyWith(isRunning: status[t.name] as bool? ?? t.isRunning),
     ]);

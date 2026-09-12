@@ -2,6 +2,54 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ssh_tunnel_client/models.dart';
 
 void main() {
+  test('SSH 连接往返保留主机校验配置', () {
+    final original = <String, dynamic>{
+      'name': 'test',
+      'host': 'example.com:22',
+      'user': 'tester',
+      'key_file': 'keys/id_ed25519',
+      'host_key_check': 'insecure',
+      'known_hosts_file': 'keys/custom_hosts',
+    };
+    expect(SshConnection.fromJson(original).toJson(), original);
+  });
+
+  test('直连隧道往返及状态更新保留认证字段和全局继承', () {
+    final original = <String, dynamic>{
+      'name': 'direct',
+      'local_port': 13306,
+      'remote_host': '127.0.0.1',
+      'remote_port': 3306,
+      'ssh_host': 'example.com:22',
+      'ssh_user': 'tester',
+      'key_file': 'keys/id_ed25519',
+      'host_key_check': 'known_hosts',
+      'known_hosts_file': 'keys/custom_hosts',
+      'reconnect_strategy': '',
+      'reconnect_interval': '',
+      'max_reconnect_attempts': 0,
+    };
+    final tunnel = Tunnel.fromJson(original);
+    expect(tunnel.toJson(), original);
+    expect(tunnel.copyWith(isRunning: true).toJson(), original);
+    expect(Tunnel.fromJson(const {}).reconnectInterval, isEmpty);
+  });
+
+  test('发现地址支持 IPv4、IPv6 和主机名', () {
+    for (final host in ['127.0.0.1', '::1', 'localhost']) {
+      final info = DaemonInfo.fromJson({'host': host, 'port': 54483});
+      for (final url in [info.httpBase, info.wsBase]) {
+        final uri = Uri.parse(url);
+        expect(uri.host, host);
+        expect(uri.port, 54483);
+      }
+      if (host == '::1') {
+        expect(info.httpBase, 'http://[::1]:54483');
+        expect(info.wsBase, 'ws://[::1]:54483');
+      }
+    }
+  });
+
   test('GlobalSettings 序列化往返一致', () {
     final s = GlobalSettings.fromJson({
       'log_level': 'debug',
