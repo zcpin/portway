@@ -6,6 +6,7 @@ import 'models.dart';
 import 'services/daemon_client.dart';
 import 'services/daemon_discovery.dart';
 import 'services/daemon_launcher.dart';
+import 'services/workspaces.dart';
 
 /// riverpod 3 移除了 AsyncValue.valueOrNull，这里补一个等价实现，
 /// 便于在 loading / error 状态下安全取值。
@@ -19,8 +20,46 @@ extension AsyncValueOrNull<T> on AsyncValue<T> {
 /// 服务发现的候选结果（仅读取与解析，未探活）。
 ///
 /// daemon 以用户进程或系统服务运行时写入位置不同，因此这里可能返回多条。
+final workspaceStoreProvider = Provider<WorkspaceStore>((ref) => WorkspaceStore());
+
+class WorkspacesNotifier extends AsyncNotifier<WorkspacePreferences> {
+  @override
+  Future<WorkspacePreferences> build() => ref.watch(workspaceStoreProvider).load();
+
+  Future<void> select(String path) async {
+    final next = await ref.read(workspaceStoreProvider).select(path);
+    if (ref.mounted) state = AsyncData(next);
+  }
+
+  Future<void> create(String name) async {
+    final next = await ref.read(workspaceStoreProvider).create(name);
+    if (ref.mounted) state = AsyncData(next);
+  }
+}
+
+final workspacesProvider = AsyncNotifierProvider<WorkspacesNotifier, WorkspacePreferences>(WorkspacesNotifier.new);
+typedef DaemonStarter = Future<bool> Function({String? configPath, String? dataDir});
+final daemonStarterProvider = Provider<DaemonStarter>((ref) => DaemonLauncher.ensureRunning);
+
 final discoveryProvider = FutureProvider<List<DaemonCandidate>>((ref) async {
-  return DaemonDiscovery.loadAll();
+  final preferences = await ref.watch(workspacesProvider.future);
+  return DaemonDiscovery.loadAll(extraPaths: preferences.workspaces.map((w) => w.discoveryPath).toList());
+});
+
+final instanceAvailabilityProvider = FutureProvider<Map<String, bool>>((ref) async {
+  final candidates = await ref.watch(discoveryProvider.future);
+  final results = await Future.wait(candidates.map((candidate) async {
+    DaemonClient? probe;
+    try {
+      probe = DaemonClient(candidate.info, connectTimeout: _probeTimeout, receiveTimeout: _probeTimeout);
+      final owned = probe;
+      ref.onDispose(owned.close);
+      return MapEntry(candidate.path, await probe.checkAuth());
+    } catch (_) {
+      return MapEntry(candidate.path, false);
+    } finally { probe?.close(); }
+  }));
+  return Map.fromEntries(results);
 });
 
 /// 已连通的 daemon 客户端；daemon 未运行时为 null。
@@ -37,28 +76,37 @@ final discoveryProvider = FutureProvider<List<DaemonCandidate>>((ref) async {
 /// 认证请求都会失败，此时自动重新发现并重建客户端。
 /// 未连接时定期重试，daemon 稍后启动即可自动连上。
 final clientProvider = FutureProvider<DaemonClient?>((ref) async {
-  var candidates = await ref.watch(discoveryProvider.future);
-  var found = await _probeCandidates(candidates);
-
-  // daemon 未运行：尝试自动拉起，成功后重新读取发现文件并探活
-  if (found == null && await DaemonLauncher.ensureRunning()) {
-    ref.invalidate(discoveryProvider);
-    candidates = await ref.watch(discoveryProvider.future);
-    found = await _probeCandidates(candidates);
-  }
-
   var disposed = false;
+  DaemonClient? found;
   Timer? timer;
-  ref.onDispose(() {
-    disposed = true;
-    timer?.cancel();
-    found?.close();
-  });
-
+  ref.onDispose(() { disposed = true; timer?.cancel(); found?.close(); });
+  final preferencesFuture = ref.watch(workspacesProvider.future);
+  final candidatesFuture = ref.watch(discoveryProvider.future);
+  final starter = ref.watch(daemonStarterProvider);
+  final preferences = await preferencesFuture;
+  if (disposed) return null;
+  var candidates = await candidatesFuture;
+  if (disposed) return null;
+  List<DaemonCandidate> selected(List<DaemonCandidate> all) => preferences.selectedPath.isEmpty ? all :
+    all.where((candidate) => DaemonDiscovery.samePath(candidate.path, preferences.selectedPath)).toList();
+  found = await _probeCandidates(selected(candidates), active: () => !disposed);
+  if (disposed) { found?.close(); return null; }
+  if (found == null) {
+    Workspace? workspace;
+    for (final candidate in preferences.workspaces) {
+      if (DaemonDiscovery.samePath(candidate.discoveryPath, preferences.selectedPath)) { workspace = candidate; break; }
+    }
+    final canLaunch = preferences.selectedPath.isEmpty || workspace != null;
+    if (canLaunch && await starter(configPath: workspace?.configPath, dataDir: workspace?.dataDir)) {
+      if (disposed) return null;
+      candidates = await DaemonDiscovery.loadAll(extraPaths: preferences.workspaces.map((w) => w.discoveryPath).toList());
+      if (disposed) return null;
+      found = await _probeCandidates(selected(candidates), active: () => !disposed);
+    }
+  }
+  if (disposed) { found?.close(); return null; }
   final client = found;
   if (client == null) {
-    // 没找到 daemon：定期重新发现。DaemonLauncher 内部带退避地重试拉起，
-    // 这里只需触发重新发现即可。
     timer = Timer.periodic(_rediscoveryInterval, (_) {
       if (disposed) return;
       ref.invalidate(discoveryProvider);
@@ -66,32 +114,29 @@ final clientProvider = FutureProvider<DaemonClient?>((ref) async {
     });
     return null;
   }
-
   var checking = false;
   timer = Timer.periodic(_healthCheckInterval, (_) async {
     if (disposed || checking) return;
     checking = true;
     try {
-      final ok = await client.checkAuth();
-      if (!ok && !disposed) {
+      if (!await client.checkAuth() && !disposed) {
         ref.invalidate(discoveryProvider);
         ref.invalidateSelf();
       }
-    } finally {
-      checking = false;
-    }
+    } finally { checking = false; }
   });
-
   return client;
 });
 
 /// 按优先级逐个探活候选位置，返回第一个通过鉴权的客户端；都不可用时返回 null。
-Future<DaemonClient?> _probeCandidates(List<DaemonCandidate> candidates) async {
+Future<DaemonClient?> _probeCandidates(List<DaemonCandidate> candidates, {bool Function()? active}) async {
   for (final candidate in candidates) {
+    if (active != null && !active()) return null;
     DaemonClient? probe;
     try {
-      probe = DaemonClient(candidate.info, connectTimeout: _probeTimeout);
-      if (await probe.checkAuth()) return DaemonClient(candidate.info);
+      final info = candidate.info.withDiscovery(path: candidate.path, shared: candidate.info.isShared);
+      probe = DaemonClient(info, connectTimeout: _probeTimeout, receiveTimeout: _probeTimeout);
+      if (await probe.checkAuth() && (active == null || active())) return DaemonClient(info);
     } catch (_) {
       // 单个发现文件的地址无效时，继续尝试后面的候选。
     } finally {
@@ -109,6 +154,9 @@ const _healthCheckInterval = Duration(seconds: 5);
 
 /// 未发现 daemon 时的重新发现间隔。
 const _rediscoveryInterval = Duration(seconds: 3);
+
+bool _clientIsCurrent(Ref ref, DaemonClient client) =>
+    ref.mounted && identical(ref.read(clientProvider).valueOrNull, client);
 
 /// 当前连接的 daemon 信息；未连接时为 null。
 final daemonInfoProvider = FutureProvider<DaemonInfo?>((ref) async {
@@ -133,10 +181,14 @@ class GlobalSettingsNotifier extends AsyncNotifier<GlobalSettings> {
     if (client == null) {
       throw StateError('未连接到 daemon');
     }
+    if (!_clientIsCurrent(ref, client)) return;
     await client.updateGlobalSettings(settings);
+    if (!_clientIsCurrent(ref, client)) return;
     // 重新读取回显（daemon 可能对输入做了归一化，如补齐默认值）
     state = const AsyncLoading();
-    state = await AsyncValue.guard(client.getGlobalSettings);
+    final next = await AsyncValue.guard(client.getGlobalSettings);
+    if (!_clientIsCurrent(ref, client)) return;
+    state = next;
     // 隧道配置可能因全局默认值变化而重启，刷新列表让界面跟上
     await ref.read(tunnelsProvider.notifier).refresh();
   }
@@ -168,6 +220,8 @@ class TunnelsNotifier extends AsyncNotifier<List<Tunnel>> {
 
   @override
   Future<List<Tunnel>> build() async {
+    _pushRevision++;
+    _lastPush = const [];
     final client = await ref.watch(clientProvider.future);
     if (client == null) return [];
     return _loadTunnels(client);
@@ -191,8 +245,10 @@ class TunnelsNotifier extends AsyncNotifier<List<Tunnel>> {
       state = const AsyncData([]);
       return;
     }
+    if (!_clientIsCurrent(ref, client)) return;
     if (state.valueOrNull == null) state = const AsyncLoading();
-    state = await AsyncValue.guard(() => _loadTunnels(client));
+    final next = await AsyncValue.guard(() => _loadTunnels(client));
+    if (_clientIsCurrent(ref, client)) state = next;
   }
 
   /// 应用 WebSocket 推送的状态，避免整表刷新造成闪烁。
@@ -225,7 +281,9 @@ class TunnelsNotifier extends AsyncNotifier<List<Tunnel>> {
     if (client == null) {
       throw StateError('未连接到 daemon');
     }
+    if (!_clientIsCurrent(ref, client)) return;
     await action(client);
+    if (!_clientIsCurrent(ref, client)) return;
     await refresh();
   }
 
@@ -234,7 +292,9 @@ class TunnelsNotifier extends AsyncNotifier<List<Tunnel>> {
   Future<List<BatchResult>> batch(String action, List<String> names) async {
     final client = await ref.read(clientProvider.future);
     if (client == null) throw StateError('未连接到 daemon');
+    if (!_clientIsCurrent(ref, client)) throw StateError('实例已切换，请重试');
     final results = await client.batchTunnels(action, names);
+    if (!_clientIsCurrent(ref, client)) return results;
     await refresh();
     return results;
   }
@@ -247,11 +307,13 @@ class TunnelsNotifier extends AsyncNotifier<List<Tunnel>> {
     if (client == null) {
       throw StateError('未连接到 daemon');
     }
+    if (!_clientIsCurrent(ref, client)) return;
     if (editingName == null || editingName.isEmpty) {
       await client.addTunnel(tunnel);
     } else {
       await client.updateTunnel(editingName, tunnel);
     }
+    if (!_clientIsCurrent(ref, client)) return;
     await refresh();
   }
 }
@@ -275,25 +337,31 @@ class SshConnectionsNotifier extends AsyncNotifier<List<SshConnection>> {
       state = const AsyncData([]);
       return;
     }
+    if (!_clientIsCurrent(ref, client)) return;
     state = const AsyncLoading();
-    state = await AsyncValue.guard(client.getSshConnections);
+    final next = await AsyncValue.guard(client.getSshConnections);
+    if (_clientIsCurrent(ref, client)) state = next;
   }
 
   Future<void> save(SshConnection conn, {String? editingName}) async {
     final client = await ref.read(clientProvider.future);
     if (client == null) return;
+    if (!_clientIsCurrent(ref, client)) return;
     if (editingName == null || editingName.isEmpty) {
       await client.addSshConnection(conn);
     } else {
       await client.updateSshConnection(editingName, conn);
     }
+    if (!_clientIsCurrent(ref, client)) return;
     await refresh();
   }
 
   Future<void> remove(String name) async {
     final client = await ref.read(clientProvider.future);
     if (client == null) return;
+    if (!_clientIsCurrent(ref, client)) return;
     await client.deleteSshConnection(name);
+    if (!_clientIsCurrent(ref, client)) return;
     await refresh();
   }
 }
@@ -308,14 +376,18 @@ class KeysNotifier extends AsyncNotifier<List<KeyInfo>> {
   Future<void> unlock(String path, String passphrase) async {
     final client = await ref.read(clientProvider.future);
     if (client == null) throw StateError('未连接到 daemon');
+    if (!_clientIsCurrent(ref, client)) throw StateError('实例已切换，请重试');
     await client.unlockKey(path, passphrase);
+    if (!_clientIsCurrent(ref, client)) return;
     await refresh();
   }
 
   Future<void> lock(String path) async {
     final client = await ref.read(clientProvider.future);
     if (client == null) throw StateError('未连接到 daemon');
+    if (!_clientIsCurrent(ref, client)) throw StateError('实例已切换，请重试');
     await client.lockKey(path);
+    if (!_clientIsCurrent(ref, client)) return;
     await refresh();
   }
   @override
@@ -331,8 +403,10 @@ class KeysNotifier extends AsyncNotifier<List<KeyInfo>> {
       state = const AsyncData([]);
       return;
     }
+    if (!_clientIsCurrent(ref, client)) return;
     state = const AsyncLoading();
-    state = await AsyncValue.guard(client.getKeys);
+    final next = await AsyncValue.guard(client.getKeys);
+    if (_clientIsCurrent(ref, client)) state = next;
   }
 
   /// 让 daemon 校验一个私钥路径是否可读，返回校验结果（路径不存在时 exists 为 false）。
@@ -353,6 +427,7 @@ final keysProvider =
 /// 日志缓冲，WebSocket 推送与历史回放共用。
 class LogsNotifier extends Notifier<List<LogEntry>> {
   static const _max = 500;
+  int _historyGeneration = 0;
 
   @override
   List<LogEntry> build() => const [];
@@ -363,15 +438,25 @@ class LogsNotifier extends Notifier<List<LogEntry>> {
   }
 
   Future<void> loadHistory() async {
-    final client = await ref.read(clientProvider.future);
-    if (client == null) return;
-    final history = await client.getLogs();
-    state = history.length > _max
-        ? history.sublist(history.length - _max)
-        : history;
+    final generation = ++_historyGeneration;
+    try {
+      final client = await ref.read(clientProvider.future);
+      if (client == null) return;
+      final history = await client.getLogs();
+      if (generation != _historyGeneration || !_clientIsCurrent(ref, client)) return;
+      final merged = <String, LogEntry>{};
+      for (final entry in [...history, ...state]) {
+        merged['${entry.timestamp}\u0000${entry.level}\u0000${entry.tunnel}\u0000${entry.message}'] = entry;
+      }
+      final entries = merged.values.toList()..sort((a, b) =>
+        (DateTime.tryParse(a.timestamp)?.microsecondsSinceEpoch ?? 0).compareTo(DateTime.tryParse(b.timestamp)?.microsecondsSinceEpoch ?? 0));
+      state = entries.length > _max ? entries.sublist(entries.length - _max) : entries;
+    } catch (_) {
+      // A disconnected instance must not restore its old history into the next one.
+    }
   }
 
-  void clear() => state = const [];
+  void clear() { _historyGeneration++; state = const []; }
 }
 
 final logsProvider =

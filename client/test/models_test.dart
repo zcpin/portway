@@ -2,6 +2,16 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ssh_tunnel_client/models.dart';
 
 void main() {
+  test('daemon 明确运行方式覆盖目录推断并保留可执行路径', () {
+    final info = DaemonInfo.fromJson({
+      'host': '127.0.0.1',
+      'port': 1234,
+      'service_mode': false,
+      'executable_path': 'fixture-daemon',
+    }).withDiscovery(path: 'custom/daemon.json', shared: true);
+    expect(info.isShared, isFalse);
+    expect(info.executablePath, 'fixture-daemon');
+  });
   test('转发类型、本机目标与跳板链在状态更新和复制时保留', () {
     final tunnel = Tunnel.fromJson({
       'name': 'reverse',

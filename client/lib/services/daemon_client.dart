@@ -22,12 +22,12 @@ class DaemonClient {
 
   /// [connectTimeout] 供服务发现阶段使用：遍历多个候选位置时，
   /// 指向已退出进程的陈旧条目应当很快失败，而不是每个都等满默认超时。
-  DaemonClient(this.info, {Duration connectTimeout = const Duration(seconds: 5)})
+  DaemonClient(this.info, {Duration connectTimeout = const Duration(seconds: 5), Duration receiveTimeout = const Duration(seconds: 10)})
       : _connectTimeout = connectTimeout,
         _dio = Dio(BaseOptions(
           baseUrl: info.httpBase,
           connectTimeout: connectTimeout,
-          receiveTimeout: const Duration(seconds: 10),
+          receiveTimeout: receiveTimeout,
           headers: {
             if (info.token.isNotEmpty) 'X-Auth-Token': info.token,
           },

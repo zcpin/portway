@@ -375,6 +375,8 @@ class DaemonInfo {
   final int pid;
   final String version;
   final String configPath;
+  final String executablePath;
+  final bool? serviceMode;
 
   /// 发现文件的来源路径。
   final String discoveryPath;
@@ -389,6 +391,8 @@ class DaemonInfo {
     required this.pid,
     required this.version,
     required this.configPath,
+    this.executablePath = '',
+    this.serviceMode,
     this.discoveryPath = '',
     this.isShared = false,
   });
@@ -400,6 +404,8 @@ class DaemonInfo {
         pid: _asInt(j['pid']),
         version: j['version'] as String? ?? '',
         configPath: j['config_path'] as String? ?? '',
+        executablePath: j['executable_path'] as String? ?? '',
+        serviceMode: j['service_mode'] as bool?,
       );
 
   /// 补充客户端侧的发现来源信息。
@@ -411,8 +417,10 @@ class DaemonInfo {
         pid: pid,
         version: version,
         configPath: configPath,
+        executablePath: executablePath,
+        serviceMode: serviceMode,
         discoveryPath: path,
-        isShared: shared,
+        isShared: serviceMode ?? shared,
       );
 
   /// 运行方式的中文描述，用于界面提示。

@@ -27,12 +27,14 @@ const EnvDataDir = "SSH_TUNNEL_DATA_DIR"
 
 // Info 是客户端做本地服务发现时读取的内容。
 type Info struct {
-	Host       string `json:"host"`
-	Port       int    `json:"port"`
-	Token      string `json:"token,omitempty"`
-	PID        int    `json:"pid"`
-	Version    string `json:"version"`
-	ConfigPath string `json:"config_path,omitempty"`
+	Host           string `json:"host"`
+	Port           int    `json:"port"`
+	Token          string `json:"token,omitempty"`
+	PID            int    `json:"pid"`
+	Version        string `json:"version"`
+	ConfigPath     string `json:"config_path,omitempty"`
+	ExecutablePath string `json:"executable_path,omitempty"`
+	ServiceMode    *bool  `json:"service_mode,omitempty"`
 }
 
 // UserPath 返回用户级发现文件路径。

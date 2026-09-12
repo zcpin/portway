@@ -8,7 +8,6 @@ import 'models.dart';
 import 'providers.dart';
 import 'services/daemon_client.dart';
 import 'services/daemon_discovery.dart';
-import 'services/daemon_launcher.dart';
 import 'services/settings_store.dart';
 import 'services/tray.dart';
 import 'pages/about_page.dart';
@@ -17,6 +16,7 @@ import 'pages/keys_page.dart';
 import 'pages/logs_page.dart';
 import 'pages/settings_page.dart';
 import 'pages/tunnels_page.dart';
+import 'pages/workspace_switcher.dart';
 
 /// 强制本机回环请求不走系统代理。
 ///
@@ -252,6 +252,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WindowListener {
       });
     });
 
+    ref.listen(clientProvider, (previous, next) {
+      ref.read(logsProvider.notifier).clear();
+      next.whenData((client) {
+        if (client != null) ref.read(logsProvider.notifier).loadHistory();
+      });
+    });
+
     // 让托盘菜单反映当前运行中的隧道数量
     ref.listen(tunnelsProvider, (_, next) {
       _tray.updateStatus(
@@ -281,8 +288,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WindowListener {
             child: Column(
               children: [
                 _ConnectionBanner(state: connection),
+                const WorkspaceSwitcher(),
                 Expanded(
                   child: connection.when(
+                    skipLoadingOnRefresh: false,
+                    skipLoadingOnReload: false,
                     loading: () =>
                         const Center(child: CircularProgressIndicator()),
                     error: (e, _) => _DaemonMissing(message: e.toString()),
@@ -293,6 +303,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WindowListener {
                         return const _DaemonMissing();
                       }
                       return IndexedStack(
+                        key: ValueKey('${client?.info.discoveryPath}|${client?.info.token}'),
                         index: _selected,
                         children: _pages,
                       );
@@ -327,7 +338,7 @@ class _ConnectionBanner extends ConsumerWidget {
         color = theme.colorScheme.tertiary;
       },
       error: (_, _) {
-        text = 'daemon 未运行';
+        text = '连接不可用';
         color = theme.colorScheme.error;
       },
       data: (client) {
@@ -397,7 +408,7 @@ class _DaemonMissing extends ConsumerWidget {
                     Icon(Icons.power_off,
                         color: theme.colorScheme.error, size: 28),
                     const SizedBox(width: 12),
-                    Text('未检测到运行中的 daemon',
+                    Text('当前实例未连接',
                         style: theme.textTheme.titleLarge),
                   ],
                 ),
@@ -414,7 +425,7 @@ class _DaemonMissing extends ConsumerWidget {
                 const SizedBox(height: 16),
                 FilledButton.icon(
                   onPressed: () async {
-                    await DaemonLauncher.ensureRunning();
+                    ref.invalidate(clientProvider);
                     // 重新读取发现文件并重新探活；其余数据状态随之级联刷新
                     ref.invalidate(discoveryProvider);
                     ref.invalidate(tunnelsProvider);
@@ -422,7 +433,7 @@ class _DaemonMissing extends ConsumerWidget {
                     ref.invalidate(keysProvider);
                   },
                   icon: const Icon(Icons.play_arrow),
-                  label: const Text('启动本地 daemon'),
+                  label: const Text('重新检测 / 启动工作区'),
                 ),
                 const SizedBox(height: 16),
                 Text('客户端会依次检查以下位置（按优先级）：',
@@ -440,9 +451,9 @@ class _DaemonMissing extends ConsumerWidget {
                 if (found.isNotEmpty) ...[
                   const SizedBox(height: 12),
                   Text(
-                    '已找到 ${found.length} 个发现文件，但均无响应：'
+                    '已找到 ${found.length} 个发现文件：'
                     '${found.map((c) => c.info.sourceLabel).join('、')}。'
-                    '可能是 daemon 已被强制结束而文件未清理，或端口处于异常状态。',
+                    '当前实例尚未通过连接验证，可在上方选择其他实例或重新检测。',
                     style: theme.textTheme.bodySmall
                         ?.copyWith(color: theme.colorScheme.error),
                   ),

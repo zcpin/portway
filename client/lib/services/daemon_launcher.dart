@@ -23,10 +23,10 @@ class DaemonLauncher {
       Platform.isWindows ? 'ssh-tunnel-daemon.exe' : 'ssh-tunnel-daemon';
 
   /// 本会话内是否已经发起过拉起，避免创建重复进程。
-  static bool _launchAttempted = false;
+  static final _launches = <String, Future<bool>>{};
 
   /// 最近一次拉起的时间，用于失败后的退避重试。
-  static DateTime _lastLaunchAt = DateTime.fromMillisecondsSinceEpoch(0);
+  static final _lastLaunchAt = <String, DateTime>{};
 
   /// 拉起后等待 daemon 就绪的轮询间隔。
   static const _pollInterval = Duration(milliseconds: 250);
@@ -66,29 +66,37 @@ class DaemonLauncher {
   ///
   /// 调用方应在返回 true 后重新读取服务发现文件（daemon 每次启动会
   /// 更换端口与 token）。本方法自带防重：已在冷却期内不会重复拉起。
-  static Future<bool> ensureRunning() async {
-    if (await _anyDaemonHealthy()) return true;
+  static Future<bool> ensureRunning({String? configPath, String? dataDir}) {
+    if ((configPath == null) != (dataDir == null)) throw ArgumentError('configPath and dataDir must be provided together');
+    final key = dataDir ?? '';
+    return _launches.putIfAbsent(key, () => _ensureRunning(configPath: configPath, dataDir: dataDir)
+      .whenComplete(() => _launches.remove(key)));
+  }
+
+  static Future<bool> _ensureRunning({String? configPath, String? dataDir}) async {
+    if (await _anyDaemonHealthy(dataDir)) return true;
 
     final path = bundledDaemonPath;
     if (path == null) return false; // 未随客户端分发，无法自动拉起
 
     final now = DateTime.now();
-    final inBackoff = _launchAttempted &&
-        now.difference(_lastLaunchAt) < _retryBackoff;
+    final key = dataDir ?? '';
+    final last = _lastLaunchAt[key];
+    final inBackoff = last != null && now.difference(last) < _retryBackoff;
     if (inBackoff) {
       // 刚拉过还没就绪：不重复创建进程，交给调用方的周期重试再探
       return false;
     }
 
-    _launchAttempted = true;
-    _lastLaunchAt = now;
+    _lastLaunchAt[key] = now;
 
     try {
       // detached 不创建需要客户端消费的 stdout/stderr 管道，
       // daemon 的日志输出与生命周期都不再依赖客户端。
       await Process.start(
         path,
-        const ['-hide-console'],
+        ['-hide-console', if (configPath != null) ...['-config', configPath, '-addr', '127.0.0.1:0']],
+        environment: dataDir == null ? null : {DaemonDiscovery.envDataDir: dataDir},
         mode: ProcessStartMode.detached,
       );
     } catch (e) {
@@ -96,26 +104,27 @@ class DaemonLauncher {
       return false;
     }
 
-    return _waitUntilHealthy();
+    return _waitUntilHealthy(dataDir);
   }
 
   /// 轮询发现文件并逐个探活，直到有一个 daemon 可访问或超时。
-  static Future<bool> _waitUntilHealthy() async {
+  static Future<bool> _waitUntilHealthy(String? dataDir) async {
     final deadline = DateTime.now().add(_waitTimeout);
     while (DateTime.now().isBefore(deadline)) {
-      if (await _anyDaemonHealthy()) return true;
+      if (await _anyDaemonHealthy(dataDir)) return true;
       await Future<void>.delayed(_pollInterval);
     }
     return false;
   }
 
   /// 读取全部候选发现文件并探活，存在任意一个可访问的 daemon 即返回 true。
-  static Future<bool> _anyDaemonHealthy() async {
-    final candidates = await DaemonDiscovery.loadAll();
+  static Future<bool> _anyDaemonHealthy(String? dataDir) async {
+    final candidates = dataDir == null ? await DaemonDiscovery.loadAll()
+      : await DaemonDiscovery.loadPaths(['$dataDir${Platform.pathSeparator}daemon.json']);
     for (final candidate in candidates) {
       DaemonClient? probe;
       try {
-        probe = DaemonClient(candidate.info, connectTimeout: _probeTimeout);
+        probe = DaemonClient(candidate.info, connectTimeout: _probeTimeout, receiveTimeout: _probeTimeout);
         if (await probe.checkAuth()) return true;
       } catch (_) {
         // 跳过不可用的候选地址。

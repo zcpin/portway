@@ -7,6 +7,12 @@ import 'package:ssh_tunnel_client/models.dart';
 import 'package:ssh_tunnel_client/providers.dart';
 import 'package:ssh_tunnel_client/services/daemon_client.dart';
 import 'package:ssh_tunnel_client/services/daemon_discovery.dart';
+import 'package:ssh_tunnel_client/services/workspaces.dart';
+
+class _EmptyWorkspaces extends WorkspacesNotifier {
+  @override
+  Future<WorkspacePreferences> build() async => const WorkspacePreferences();
+}
 
 class _DirectConnections extends HttpOverrides {
   @override
@@ -69,6 +75,7 @@ void main() {
     );
     final container = ProviderContainer(
       overrides: [
+        workspacesProvider.overrideWith(_EmptyWorkspaces.new),
         discoveryProvider.overrideWith(
           (ref) async => [
             DaemonCandidate(path: 'invalid', info: info('bad:host', 'bad')),

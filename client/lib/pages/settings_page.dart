@@ -84,6 +84,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 : _intervalCtrl.text.trim(),
             maxReconnectAttempts: maxAttempts < 0 ? 0 : maxAttempts,
           ));
+      if (!mounted) return;
       setState(() => _dirty = false);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -97,7 +98,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
         );
       }
     } finally {
-      setState(() => _saving = false);
+      if (mounted) setState(() => _saving = false);
     }
   }
 

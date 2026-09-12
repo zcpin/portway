@@ -109,13 +109,16 @@ func New(opts Options) (*Daemon, error) {
 	}
 
 	// 把连接信息写给客户端做服务发现，进程退出时清理
+	executable, _ := os.Executable()
 	infoPath, err := discovery.Write(discovery.Info{
-		Host:       host,
-		Port:       port,
-		Token:      token,
-		PID:        os.Getpid(),
-		Version:    opts.Version,
-		ConfigPath: cfgPath,
+		Host:           host,
+		Port:           port,
+		Token:          token,
+		PID:            os.Getpid(),
+		Version:        opts.Version,
+		ConfigPath:     cfgPath,
+		ExecutablePath: executable,
+		ServiceMode:    &opts.ServiceMode,
 	}, opts.ServiceMode)
 	if err != nil {
 		logger.Warn("写入服务发现文件失败，客户端需手动配置连接信息: %v", err)

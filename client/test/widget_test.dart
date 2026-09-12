@@ -5,10 +5,26 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:ssh_tunnel_client/main.dart';
+import 'package:ssh_tunnel_client/providers.dart';
+import 'package:ssh_tunnel_client/services/workspaces.dart';
+
+class _EmptyWorkspaces extends WorkspacesNotifier {
+  @override
+  Future<WorkspacePreferences> build() async => const WorkspacePreferences();
+}
 
 void main() {
   testWidgets('app shell renders', (WidgetTester tester) async {
-    await tester.pumpWidget(const ProviderScope(child: SshTunnelApp()));
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          clientProvider.overrideWith((ref) async => null),
+          discoveryProvider.overrideWith((ref) async => []),
+          workspacesProvider.overrideWith(_EmptyWorkspaces.new),
+        ],
+        child: const SshTunnelApp(),
+      ),
+    );
     await tester.pump();
 
     // 主界面应包含导航栏的四个入口

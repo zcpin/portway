@@ -83,15 +83,28 @@ class DaemonDiscovery {
   /// 读取全部可解析的候选文件，按优先级排序。
   ///
   /// 只做读取与解析，不探活——探活需要发 HTTP 请求，属于调用方的职责。
-  static Future<List<DaemonCandidate>> loadAll() async {
+  static Future<List<DaemonCandidate>> loadAll({List<String> extraPaths = const []}) async {
     final shared = sharedPath;
     final candidates = <DaemonCandidate>[];
 
-    for (final path in candidatePaths) {
+    final paths = <String>[];
+    for (final path in [...candidatePaths, ...extraPaths]) {
+      if (!paths.any((existing) => samePath(existing, path))) paths.add(path);
+    }
+    for (final path in paths) {
       final info = await _read(path, isShared: _samePath(path, shared));
       if (info != null) {
         candidates.add(DaemonCandidate(path: path, info: info));
       }
+    }
+    return candidates;
+  }
+
+  static Future<List<DaemonCandidate>> loadPaths(List<String> paths) async {
+    final candidates = <DaemonCandidate>[];
+    for (final path in paths) {
+      final info = await _read(path, isShared: false);
+      if (info != null) candidates.add(DaemonCandidate(path: path, info: info));
     }
     return candidates;
   }
@@ -101,12 +114,15 @@ class DaemonDiscovery {
     try {
       final file = File(path);
       if (!await file.exists()) return null;
+      if (await file.length() > 64 * 1024) return null;
 
       final decoded = tryDecode(await file.readAsString());
       if (decoded == null) return null;
 
       final info = DaemonInfo.fromJson(decoded);
-      if (info.port <= 0) return null;
+      if (info.port <= 0 || info.port > 65535) return null;
+      final address = InternetAddress.tryParse(info.host);
+      if (info.host.toLowerCase() != 'localhost' && !(address?.isLoopback ?? false)) return null;
       return info.withDiscovery(path: path, shared: isShared);
     } catch (_) {
       // 权限不足、文件被写坏等情况一律当作「该候选不可用」
@@ -127,7 +143,11 @@ class DaemonDiscovery {
   }
 
   /// 路径比较：忽略分隔符差异与大小写（Windows 上同一路径可能多种写法）。
-  static bool _samePath(String a, String b) =>
-      a.replaceAll('\\', '/').toLowerCase() ==
-      b.replaceAll('\\', '/').toLowerCase();
+  static bool samePath(String a, String b) {
+    final left = File(a).absolute.path.replaceAll('\\', '/');
+    final right = File(b).absolute.path.replaceAll('\\', '/');
+    return Platform.isWindows ? left.toLowerCase() == right.toLowerCase() : left == right;
+  }
+
+  static bool _samePath(String a, String b) => samePath(a, b);
 }

@@ -126,6 +126,8 @@ flutter run -d windows        # 或 macos / linux
 拉起后 daemon 独立常驻：关闭或退出客户端都不影响隧道。
 WebSocket 连接恢复后，客户端会自动同步完整隧道列表与运行状态，包括离线期间的增删改。
 
+顶部实例菜单可以选择自动发现的 daemon，或创建独立工作区。工作区配置与发现文件放在 `~/.ssh-tunnel/workspaces/<工作区标识>/`，名称和当前选择保存在 `~/.ssh-tunnel/workspaces.json`。新工作区从空配置启动，可再从「设置」导入配置。选定实例离线时保持该选择；需要切换时可手动选择其他实例或「自动选择实例」。切换会关闭旧客户端连接并重新加载列表、密钥、日志和设置，不停止原 daemon 的隧道。
+
 ### 3. 配置隧道
 
 复制 `daemon/ssh-tunnel.example.toml` 为 `ssh-tunnel.toml`，或在客户端界面中添加 SSH 连接与隧道。
