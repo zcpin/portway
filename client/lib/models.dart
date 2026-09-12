@@ -168,6 +168,46 @@ class BatchResult {
   );
 }
 
+class ConfigExport {
+  final String content;
+  final String revision;
+  const ConfigExport({required this.content, required this.revision});
+  factory ConfigExport.fromJson(Map<String, dynamic> json) => ConfigExport(
+    content: json['content'] as String, revision: json['revision'] as String);
+}
+
+class ConfigChange {
+  final String kind;
+  final String name;
+  final String action;
+  const ConfigChange({required this.kind, required this.name, required this.action});
+  factory ConfigChange.fromJson(Map<String, dynamic> json) => ConfigChange(
+    kind: json['kind'] as String, name: json['name'] as String, action: json['action'] as String);
+  String get label {
+    final verb = switch (action) { 'add' => '新增', 'replace' => '覆盖', 'remove' => '移除', _ => action };
+    final subject = switch (kind) { 'ssh' => 'SSH 连接', 'tunnel' => '隧道', 'global' => '全局设置', _ => kind };
+    return '$verb $subject${kind == 'global' ? '' : '：$name'}';
+  }
+}
+
+class ImportPreview {
+  final String revision;
+  final List<ConfigChange> changes;
+  const ImportPreview({required this.revision, required this.changes});
+  factory ImportPreview.fromJson(Map<String, dynamic> json) => ImportPreview(
+    revision: json['revision'] as String,
+    changes: (json['changes'] as List).map((value) => ConfigChange.fromJson(value)).toList());
+}
+
+class ConfigBackup {
+  final String name;
+  final String createdAt;
+  final int size;
+  const ConfigBackup({required this.name, required this.createdAt, required this.size});
+  factory ConfigBackup.fromJson(Map<String, dynamic> json) => ConfigBackup(
+    name: json['name'] as String, createdAt: json['created_at'] as String, size: _asInt(json['size']));
+}
+
 /// 可复用的 SSH 连接配置。
 class SshConnection {
   final String name;

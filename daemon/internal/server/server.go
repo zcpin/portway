@@ -120,6 +120,11 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("POST /api/reload", s.auth(http.HandlerFunc(s.handleReload)))
 	mux.Handle("GET /api/status", s.auth(http.HandlerFunc(s.handleStatus)))
 	mux.Handle("GET /api/config", s.auth(http.HandlerFunc(s.handleGetConfig)))
+	mux.Handle("GET /api/config/export", s.auth(http.HandlerFunc(s.handleExportConfig)))
+	mux.Handle("POST /api/config/preview", s.auth(http.HandlerFunc(s.handlePreviewImport)))
+	mux.Handle("POST /api/config/import", s.auth(http.HandlerFunc(s.handleImportConfig)))
+	mux.Handle("GET /api/config/backups", s.auth(http.HandlerFunc(s.handleListBackups)))
+	mux.Handle("GET /api/config/backups/{name}", s.auth(http.HandlerFunc(s.handleReadBackup)))
 	mux.Handle("PUT /api/config", s.auth(http.HandlerFunc(s.handleUpdateConfig)))
 
 	return mux

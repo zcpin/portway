@@ -130,6 +130,20 @@ class DaemonClient {
 
   Future<void> reload() => _post('/api/reload', null);
 
+  Future<ConfigExport> exportConfig() async => ConfigExport.fromJson((await _dio.get('/api/config/export')).data);
+
+  Future<ImportPreview> previewImport(String content, String mode) async =>
+      ImportPreview.fromJson((await _dio.post('/api/config/preview', data: {'content': content, 'mode': mode})).data);
+
+  Future<ConfigBackup> importConfig(String content, String mode, String revision) async =>
+      ConfigBackup.fromJson((await _dio.post('/api/config/import', data: {'content': content, 'mode': mode, 'revision': revision})).data);
+
+  Future<List<ConfigBackup>> listConfigBackups() async =>
+      ((await _dio.get('/api/config/backups')).data as List).map((value) => ConfigBackup.fromJson(value)).toList();
+
+  Future<String> readConfigBackup(String name) async =>
+      (await _dio.get('/api/config/backups/${Uri.encodeComponent(name)}')).data['content'] as String;
+
   /// 读取全局配置项（日志级别、重连默认值）。
   Future<GlobalSettings> getGlobalSettings() async {
     final resp = await _dio.get('/api/config');

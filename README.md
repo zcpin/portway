@@ -192,6 +192,8 @@ ssh-keyscan example.com >> ~/.ssh/known_hosts
   - 日志级别在保存或重新加载配置成功后立即生效；无效写入请求会在保存前被拒绝，写盘失败会保留原配置和运行状态
 - **关于**：程序简介、快速上手步骤、GitHub 仓库地址
 
+「设置 → 配置导入与备份」支持导出 TOML、读取文件或粘贴配置。导入上限为 256 KiB，可合并并覆盖同名项，或替换完整配置；必须先预览再确认。如果预览后配置被修改，需要重新预览。每次成功应用前都会在配置文件旁的 `<配置文件名>.backups` 目录保存原文件；恢复备份同样经过预览，并会再次备份当前配置。备份列表显示最近 100 项，文件不会自动清理。
+
 ## 命令行
 
 ```
@@ -236,6 +238,10 @@ ssh-tunnel-daemon service <动作>       系统服务托管
 | POST | `/api/reload` | 重新加载配置 |
 | GET | `/api/config` | 全局配置（日志级别、重连默认值） |
 | PUT | `/api/config` | 更新全局配置（未单独配置的隧道会套用新默认值并重启） |
+| GET | `/api/config/export` | 导出 TOML 和当前修订号 |
+| POST | `/api/config/preview` | 校验 `content`、`mode=merge/replace` 并预览变更 |
+| POST | `/api/config/import` | 使用预览返回的 `revision` 导入并先备份，版本冲突返回 409 |
+| GET | `/api/config/backups[/{name}]` | 列出备份或读取指定备份，读取后可按替换模式预览/导入 |
 | GET | `/ws` | WebSocket 事件流 |
 
 写接口的请求体上限为 1 MiB，字段名写错会直接返回 400。

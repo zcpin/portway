@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models.dart';
 import '../providers.dart';
 import '../services/settings_store.dart';
+import 'config_transfer_panel.dart';
 
 /// 左侧导航「设置」页。
 ///
@@ -257,6 +258,12 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                     );
                   },
                 ),
+              ),
+              const SizedBox(height: 16),
+              _Card(
+                title: '配置导入与备份',
+                subtitle: '导入前校验并展示变更，应用时备份原配置。',
+                child: ConfigTransferPanel(onApplied: () => setState(() => _dirty = false)),
               ),
             ],
           ),
