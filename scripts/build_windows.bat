@@ -26,6 +26,8 @@ set "BUILD_NAME=%~2"
 if "%BUILD_NAME%"=="" for /f "tokens=1 delims=-+" %%V in ("%APP_VERSION%") do set "BUILD_NAME=%%V"
 set "BUILD_NUMBER=%~3"
 if "%BUILD_NUMBER%"=="" set "BUILD_NUMBER=1"
+set "RELEASE_REPOSITORY=%GITHUB_REPOSITORY%"
+if "%RELEASE_REPOSITORY%"=="" set "RELEASE_REPOSITORY=byteporter/ssh-tunnel"
 
 set "RELEASE_DIR=client\build\windows\x64\runner\Release"
 
@@ -37,11 +39,12 @@ popd
 echo [2/5] Building Go daemon into release dir...
 if not exist "%RELEASE_DIR%" mkdir "%RELEASE_DIR%"
 pushd daemon
-go build -trimpath -ldflags "-s -w -X main.version=%APP_VERSION%" -o "..\%RELEASE_DIR%\ssh-tunnel-daemon.exe" ./cmd/ssh-tunnel || exit /b 1
+go build -trimpath -ldflags "-s -w -X main.version=%APP_VERSION% -X main.releaseRepository=%RELEASE_REPOSITORY%" -o "..\%RELEASE_DIR%\ssh-tunnel-daemon.exe" ./cmd/ssh-tunnel || exit /b 1
 popd
 
 echo [3/5] Copying sample config...
 copy /y "daemon\ssh-tunnel.example.toml" "%RELEASE_DIR%\ssh-tunnel.example.toml" >nul || exit /b 1
+"%RELEASE_DIR%\ssh-tunnel-daemon.exe" update mark-portable || exit /b 1
 
 echo [4/5] Building installer with Inno Setup 6...
 set "ISCC="

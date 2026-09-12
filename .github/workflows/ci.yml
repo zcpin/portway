@@ -42,6 +42,23 @@ jobs:
       - name: go test (race)
         run: go test -race ./...
 
+  updater-platforms:
+    name: Portable updater (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: daemon/go.mod
+          cache-dependency-path: daemon/go.sum
+      - name: Test portable updater with temporary fixtures
+        working-directory: daemon
+        run: go test -mod=readonly -timeout=120s ./internal/update
+
   client:
     name: Flutter client
     runs-on: ubuntu-latest

@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+	"os"
 
 	"github.com/byteporter/ssh-tunnel/internal/config"
 )
@@ -21,6 +22,26 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.app.GetStatus())
+}
+
+func (s *Server) handleUpdateShutdown(w http.ResponseWriter, r *http.Request) {
+	if s.token == "" || s.updateShutdown == nil {
+		writeError(w, http.StatusForbidden, "automatic upgrades require an authenticated user daemon")
+		return
+	}
+	var input struct {
+		PID int `json:"pid"`
+	}
+	if err := decodeJSON(w, r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if input.PID != os.Getpid() {
+		writeError(w, http.StatusConflict, "daemon restarted since upgrade preparation")
+		return
+	}
+	writeOK(w)
+	go s.updateShutdown()
 }
 
 func (s *Server) handleListTunnels(w http.ResponseWriter, r *http.Request) {

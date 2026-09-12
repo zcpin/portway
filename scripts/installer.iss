@@ -47,7 +47,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
 ; 发布目录包含：客户端 exe、Flutter 运行库 data\、daemon exe、示例配置。
-Source: "{#AppBundleDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#AppBundleDir}\*"; DestDir: "{app}"; Excludes: "ssh-tunnel-portable.json"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExe}"

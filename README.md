@@ -277,6 +277,7 @@ ssh-tunnel-daemon service <动作>       系统服务托管
 | POST | `/api/keys/lock` | 锁定 `path` 对应的内存私钥 |
 | GET | `/api/logs` | 日志缓冲 |
 | GET | `/api/status` | 所有隧道的运行状态（`{名称: 是否运行}`） |
+| POST | `/api/update/shutdown` | 升级助手携带当前 `pid` 请求退出；仅允许有 token 的用户进程，系统服务拒绝此操作 |
 | POST | `/api/reload` | 重新加载配置 |
 | GET | `/api/config` | 全局配置（日志级别、重连默认值） |
 | PUT | `/api/config` | 更新全局配置（未单独配置的隧道会套用新默认值并重启） |
@@ -393,12 +394,34 @@ git push origin v1.2.3
 |---|---|
 | Windows | `ssh-tunnel-setup-<版本>.exe`（安装包）+ `ssh-tunnel-portable-<版本>.zip`（便携版） |
 | Linux | `ssh-tunnel-portable-<版本>-linux-x64.tar.gz` |
-| macOS | `ssh-tunnel-portable-<版本>-macos-<arch>.zip`（跟随 runner 架构，arm64 / x64） |
+| macOS | `ssh-tunnel-portable-<版本>-macos-<arch>.zip`（跟随 runner 架构，arm64 / amd64） |
 
 > macOS 为 ad-hoc 签名、未公证，分发给其它 Mac 首次需右键「打开」绕过 Gatekeeper；
 > 正式分发建议补上 Developer ID 签名与 notarization。
 
 Linux 便携版需要系统提供 GTK 3 与 Ayatana AppIndicator（或 AppIndicator）运行库；发布工作流会显式安装对应的开发依赖。
+
+### 检查更新与便携升级
+
+「设置 → 版本与升级」可以手动检查稳定版或包含预发布的渠道。版本按语义版本比较，构建元数据不影响排序；开发和 CI 构建会说明无法比较。检查使用本地随包工具，不依赖当前选中的 daemon。发布来源由 GitHub Actions 的 `GITHUB_REPOSITORY` 注入，支持 fork；本地构建默认使用 `byteporter/ssh-tunnel`。
+
+下载会匹配 Windows x64、Linux x64 或 macOS amd64/arm64 产物，并验证该 Release 的 `SHA256SUMS-*`。未通过大小或 SHA256 校验的文件不会用于安装。下载保存在系统用户缓存目录的 `ssh-tunnel/updates/` 下，界面可以打开对应目录。GitHub 仓库不可用、请求限流或缺少匹配产物时会显示错误。
+
+正式便携包带有 `ssh-tunnel-portable.json`（macOS 位于 `.app/Contents/MacOS/`），安装器不包含此文件。确认「升级便携版」后，工具再次校验包、版本、仓库与平台，并在安装目录旁展开新版本；助手从独立缓存目录运行，等待客户端退出，停止此安装的用户 daemon，然后备份并替换整个程序目录。所有用户配置及工作区保留在原位置，原有 daemon 按原配置重新启动。安装目录内存在用户配置时会拒绝自动替换，需先迁移到用户目录。
+
+新程序会在首帧后向助手确认启动。替换或启动失败会恢复原程序；原程序备份位于安装目录旁的 `.ssh-tunnel-backup-*`。结果和助手日志保留在缓存的 `apply-*/` 目录，设置页也会显示上次结果。该检查覆盖启动阶段；运行后发现业务问题仍可退出程序后手动恢复备份。备份和失败的暂存目录不自动清理。
+
+自动升级需要安装目录及其父目录可写，且同一安装的其他客户端已退出。每个便携 daemon 在运行期间持有共享锁；仍有系统服务或未登记的实例使用该目录时会拒绝替换。安装版请下载并运行安装程序；系统服务需要先由服务管理器停止，再手动更新并重启。macOS GitHub 分发版本关闭 App Sandbox，以支持独立工作区、外部更新助手和普通用户目录访问；仍使用前述 ad-hoc 签名。
+
+命令行也可检查和下载（输出 JSON）：
+
+```powershell
+.\ssh-tunnel-daemon.exe update info
+.\ssh-tunnel-daemon.exe update check -channel stable
+.\ssh-tunnel-daemon.exe update download -tag v1.2.3 -kind portable
+```
+
+`update prepare`、`launch`、`apply` 为客户端与外部助手的内部协议；`mark-portable` 仅由构建脚本在完整 bundle 内调用。CI 在 Linux 运行竞态检查，并在 Windows/macOS 运行临时夹具升级测试。
 
 安装程序为**按用户安装**（无需管理员权限），安装到
 `%LOCALAPPDATA%\Programs\SSH Tunnel Manager`，创建开始菜单与桌面快捷方式。

@@ -18,6 +18,15 @@ import 'daemon_discovery.dart';
 class DaemonLauncher {
   DaemonLauncher._();
 
+  static bool _updatePaused = false;
+
+  static Future<void> pauseForUpdate() async {
+    _updatePaused = true;
+    await Future.wait(_launches.values.toList());
+  }
+
+  static void resumeAfterUpdate() => _updatePaused = false;
+
   /// daemon 可执行文件名。
   static final String _exeName =
       Platform.isWindows ? 'ssh-tunnel-daemon.exe' : 'ssh-tunnel-daemon';
@@ -67,6 +76,7 @@ class DaemonLauncher {
   /// 调用方应在返回 true 后重新读取服务发现文件（daemon 每次启动会
   /// 更换端口与 token）。本方法自带防重：已在冷却期内不会重复拉起。
   static Future<bool> ensureRunning({String? configPath, String? dataDir}) {
+    if (_updatePaused) return Future.value(false);
     if ((configPath == null) != (dataDir == null)) throw ArgumentError('configPath and dataDir must be provided together');
     final key = dataDir ?? '';
     return _launches.putIfAbsent(key, () => _ensureRunning(configPath: configPath, dataDir: dataDir)
@@ -91,6 +101,7 @@ class DaemonLauncher {
     _lastLaunchAt[key] = now;
 
     try {
+      if (_updatePaused) return false;
       // detached 不创建需要客户端消费的 stdout/stderr 管道，
       // daemon 的日志输出与生命周期都不再依赖客户端。
       await Process.start(

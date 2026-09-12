@@ -10,6 +10,7 @@ import 'services/daemon_client.dart';
 import 'services/daemon_discovery.dart';
 import 'services/settings_store.dart';
 import 'services/tray.dart';
+import 'services/updates.dart';
 import 'pages/about_page.dart';
 import 'pages/connections_page.dart';
 import 'pages/keys_page.dart';
@@ -53,6 +54,7 @@ void main() async {
   await windowManager.setPreventClose(true);
 
   runApp(const ProviderScope(child: SshTunnelApp()));
+  WidgetsBinding.instance.addPostFrameCallback((_) { UpdateService.signalReady(); });
 }
 
 class SshTunnelApp extends StatelessWidget {
@@ -107,13 +109,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WindowListener {
   static const _settingsIndex = 4;
 
   /// 导航对应的页面。设置 / 关于无需连接 daemon 即可渲染。
-  static const _pages = <Widget>[
-    TunnelsPage(),
-    ConnectionsPage(),
-    KeysPage(),
-    LogsPage(),
-    SettingsPage(),
-    AboutPage(),
+  List<Widget> get _pages => [
+    const TunnelsPage(),
+    const ConnectionsPage(),
+    const KeysPage(),
+    const LogsPage(),
+    SettingsPage(onQuitForUpdate: _quit),
+    const AboutPage(),
   ];
 
   @override

@@ -5,6 +5,7 @@ import '../models.dart';
 import '../providers.dart';
 import '../services/settings_store.dart';
 import 'config_transfer_panel.dart';
+import 'update_panel.dart';
 
 /// 左侧导航「设置」页。
 ///
@@ -12,7 +13,8 @@ import 'config_transfer_panel.dart';
 ///   - 关闭窗口行为的默认动作（客户端本地，存于 ~/.ssh-tunnel/client_settings.json）
 ///   - 隧道重连的全局默认值（daemon 配置，未单独设置的隧道回退使用）
 class SettingsPage extends ConsumerStatefulWidget {
-  const SettingsPage({super.key});
+  const SettingsPage({super.key, this.onQuitForUpdate});
+  final Future<void> Function()? onQuitForUpdate;
 
   @override
   ConsumerState<SettingsPage> createState() => _SettingsPageState();
@@ -117,6 +119,13 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             children: [
               Text('设置', style: theme.textTheme.headlineSmall),
               const SizedBox(height: 20),
+
+              _Card(
+                title: '版本与升级',
+                subtitle: '手动检查 GitHub 发布版本，下载后验证文件完整性。',
+                child: UpdatePanel(onQuit: widget.onQuitForUpdate),
+              ),
+              const SizedBox(height: 16),
 
               _Card(
                 title: '关闭窗口行为',

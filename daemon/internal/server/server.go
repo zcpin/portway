@@ -20,11 +20,12 @@ import (
 
 // Server 对外提供 REST 接口与 WebSocket 事件流。
 type Server struct {
-	app      *app.App
-	hub      *Hub
-	token    string
-	server   *http.Server
-	listener net.Listener
+	app            *app.App
+	hub            *Hub
+	token          string
+	server         *http.Server
+	listener       net.Listener
+	updateShutdown func()
 }
 
 // New 创建 Server，token 为空表示关闭认证（仅限回环地址下使用）。
@@ -90,6 +91,11 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return s.server.Shutdown(ctx)
 }
 
+// SetUpdateShutdown is configured before Serve, only for authenticated user daemons.
+func (s *Server) SetUpdateShutdown(shutdown func()) {
+	s.updateShutdown = shutdown
+}
+
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 
@@ -123,6 +129,7 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("GET /api/logs", s.auth(http.HandlerFunc(s.handleLogs)))
 	mux.Handle("POST /api/reload", s.auth(http.HandlerFunc(s.handleReload)))
 	mux.Handle("GET /api/status", s.auth(http.HandlerFunc(s.handleStatus)))
+	mux.Handle("POST /api/update/shutdown", s.auth(http.HandlerFunc(s.handleUpdateShutdown)))
 	mux.Handle("GET /api/config", s.auth(http.HandlerFunc(s.handleGetConfig)))
 	mux.Handle("GET /api/config/export", s.auth(http.HandlerFunc(s.handleExportConfig)))
 	mux.Handle("POST /api/config/preview", s.auth(http.HandlerFunc(s.handlePreviewImport)))

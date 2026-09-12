@@ -19,10 +19,14 @@ import (
 	"github.com/byteporter/ssh-tunnel/internal/autostart"
 	daemonpkg "github.com/byteporter/ssh-tunnel/internal/daemon"
 	"github.com/byteporter/ssh-tunnel/internal/svc"
+	"github.com/byteporter/ssh-tunnel/internal/update"
 )
 
 // version 由构建脚本注入：-ldflags "-X main.version=v1.2.3"
 var version = "dev"
+
+// Release builds inject the actual repository, including forks.
+var releaseRepository = "byteporter/ssh-tunnel"
 
 func main() {
 	args := os.Args[1:]
@@ -30,6 +34,11 @@ func main() {
 	// 第一个非 flag 参数视为子命令；没有子命令时按前台运行处理
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		switch args[0] {
+		case "update":
+			if err := update.Run(args[1:], version, releaseRepository, os.Stdin, os.Stdout); err != nil {
+				fmt.Fprintf(os.Stderr, "更新失败: %v\n", err)
+				os.Exit(1)
+			}
 		case "autostart":
 			os.Exit(handleAutostart(args[1:]))
 		case "service":
@@ -312,11 +321,17 @@ func printUsage() {
   ssh-tunnel-daemon [选项]                    前台运行
   ssh-tunnel-daemon autostart <动作> [选项]   随用户登录自动启动（推荐，无需管理员权限）
   ssh-tunnel-daemon service <动作> [选项]     系统服务托管（需要管理员/root 权限）
+  ssh-tunnel-daemon update <动作> [选项]      检查版本、下载及校验发布包
 
 autostart 动作:
   enable     登记开机自启
   disable    取消开机自启
   status     查看是否已启用
+
+update 动作:
+  info                              本地版本与安装方式
+  check -channel stable|prerelease  检查稳定版或含预发布的渠道
+  download -tag v1.2.3 -kind portable|installer  下载并校验
 
 service 动作:
   install    安装服务

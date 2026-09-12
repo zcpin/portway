@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 	"github.com/byteporter/ssh-tunnel/internal/discovery"
 	"github.com/byteporter/ssh-tunnel/internal/logger"
 	"github.com/byteporter/ssh-tunnel/internal/server"
+	"github.com/byteporter/ssh-tunnel/internal/update"
 )
 
 // Options 是启动守护进程所需的全部参数。
@@ -37,11 +39,12 @@ type Options struct {
 
 // Daemon 是一个可启动、可停止的守护进程实例。
 type Daemon struct {
-	opts     Options
-	app      *app.App
-	srv      *server.Server
-	quit     chan struct{}
-	infoPath string
+	opts         Options
+	app          *app.App
+	srv          *server.Server
+	quit         chan struct{}
+	infoPath     string
+	shutdownOnce sync.Once
 }
 
 // Run 阻塞运行守护进程，直到收到退出信号或 Shutdown 被调用。
@@ -107,6 +110,9 @@ func New(opts Options) (*Daemon, error) {
 		srv:  srv,
 		quit: make(chan struct{}),
 	}
+	if !opts.ServiceMode && !opts.NoAuth {
+		srv.SetUpdateShutdown(d.Shutdown)
+	}
 
 	// 把连接信息写给客户端做服务发现，进程退出时清理
 	executable, _ := os.Executable()
@@ -133,6 +139,16 @@ func New(opts Options) (*Daemon, error) {
 // Run 启动隧道与 API 服务，并阻塞等待退出。
 func (d *Daemon) Run() error {
 	defer discovery.Remove(d.infoPath, os.Getpid())
+	executable, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	unlock, err := update.LockRunningExecutable(executable)
+	if err != nil {
+		_ = d.srv.Shutdown(context.Background())
+		return err
+	}
+	defer unlock()
 
 	if err := d.app.Start(); err != nil {
 		logger.Error("启动隧道失败: %v", err)
@@ -171,12 +187,7 @@ func (d *Daemon) Run() error {
 
 // Shutdown 请求守护进程停止，可被服务管理器从其他 goroutine 调用。
 func (d *Daemon) Shutdown() {
-	select {
-	case <-d.quit:
-		// 已停止
-	default:
-		close(d.quit)
-	}
+	d.shutdownOnce.Do(func() { close(d.quit) })
 }
 
 // generateToken 生成 32 字节随机令牌。
