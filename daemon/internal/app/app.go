@@ -24,6 +24,8 @@ const logBufferSize = 500
 // TunnelInfo 是隧道配置与运行状态的合并视图，供 UI 直接渲染。
 type TunnelInfo struct {
 	Name                 string `json:"name"`
+	Group                string `json:"group,omitempty"`
+	AutoStart            *bool  `json:"auto_start,omitempty"`
 	LocalPort            int    `json:"local_port"`
 	RemoteHost           string `json:"remote_host"`
 	RemotePort           int    `json:"remote_port"`
@@ -156,6 +158,8 @@ func (a *App) GetTunnels() []TunnelInfo {
 	for _, t := range cfg.Tunnels {
 		result = append(result, TunnelInfo{
 			Name:                 t.Name,
+			Group:                t.Group,
+			AutoStart:            t.AutoStart,
 			LocalPort:            t.LocalPort,
 			RemoteHost:           t.RemoteHost,
 			RemotePort:           t.RemotePort,

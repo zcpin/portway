@@ -3,6 +3,8 @@ import 'dart:convert';
 /// 隧道配置与运行状态的合并视图，对应 daemon 的 /api/tunnels 返回项。
 class Tunnel {
   final String name;
+  final String group;
+  final bool autoStart;
   final int localPort;
   final String remoteHost;
   final int remotePort;
@@ -23,6 +25,8 @@ class Tunnel {
 
   const Tunnel({
     required this.name,
+    this.group = '',
+    this.autoStart = true,
     required this.localPort,
     required this.remoteHost,
     required this.remotePort,
@@ -44,6 +48,8 @@ class Tunnel {
 
   factory Tunnel.fromJson(Map<String, dynamic> j) => Tunnel(
         name: j['name'] as String? ?? '',
+        group: j['group'] as String? ?? '',
+        autoStart: j['auto_start'] as bool? ?? true,
         localPort: _asInt(j['local_port']),
         remoteHost: j['remote_host'] as String? ?? '',
         remotePort: _asInt(j['remote_port']),
@@ -65,6 +71,8 @@ class Tunnel {
 
   Map<String, dynamic> toJson() => {
         'name': name,
+        if (group.isNotEmpty) 'group': group,
+        if (!autoStart) 'auto_start': false,
         'local_port': localPort,
         'remote_host': remoteHost,
         'remote_port': remotePort,
@@ -88,6 +96,10 @@ class Tunnel {
         _ => isRunning ? '运行中' : '已停止',
       };
 
+  Tunnel duplicateAs(String name, {int? localPort}) => Tunnel.fromJson({
+        ...toJson(), 'name': name, 'local_port': localPort ?? this.localPort,
+      });
+
   Tunnel copyWith({
     bool? isRunning,
     String? state,
@@ -96,6 +108,8 @@ class Tunnel {
     String? connectedAt,
   }) => Tunnel(
         name: name,
+        group: group,
+        autoStart: autoStart,
         localPort: localPort,
         remoteHost: remoteHost,
         remotePort: remotePort,
@@ -141,6 +155,17 @@ class ConnectionDiagnostic {
         elapsedMs: _asInt(json['elapsed_ms']),
         error: json['error'] as String? ?? '',
       );
+}
+
+class BatchResult {
+  final String name;
+  final bool ok;
+  final String error;
+  const BatchResult({required this.name, required this.ok, this.error = ''});
+  factory BatchResult.fromJson(Map<String, dynamic> json) => BatchResult(
+    name: json['name'] as String, ok: json['ok'] == true,
+    error: json['error'] as String? ?? '',
+  );
 }
 
 /// 可复用的 SSH 连接配置。

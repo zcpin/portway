@@ -52,6 +52,8 @@ type SSHConnection struct {
 // Tunnel represents a single SSH tunnel configuration
 type Tunnel struct {
 	Name       string `toml:"name" json:"name"`
+	Group      string `toml:"group,omitempty" json:"group,omitempty"`
+	AutoStart  *bool  `toml:"auto_start" json:"auto_start,omitempty"`
 	LocalPort  int    `toml:"local_port" json:"local_port"`
 	RemoteHost string `toml:"remote_host" json:"remote_host"`
 	RemotePort int    `toml:"remote_port" json:"remote_port"`
@@ -67,6 +69,8 @@ type Tunnel struct {
 	ReconnectInterval    string `toml:"reconnect_interval" json:"reconnect_interval"`                 // duration string, e.g., "5s"
 	MaxReconnectAttempts int    `toml:"max_reconnect_attempts" json:"max_reconnect_attempts"`         // 0 = infinite
 }
+
+func (t Tunnel) AutoStartEnabled() bool { return t.AutoStart == nil || *t.AutoStart }
 
 // ReconnectStrategy represents the reconnection strategy
 type ReconnectStrategy string

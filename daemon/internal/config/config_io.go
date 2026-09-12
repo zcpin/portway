@@ -49,6 +49,12 @@ func cloneConfig(cfg *Config) *Config {
 	copy(result.SSHConnections, cfg.SSHConnections)
 	result.Tunnels = make([]Tunnel, len(cfg.Tunnels))
 	copy(result.Tunnels, cfg.Tunnels)
+	for i := range result.Tunnels {
+		if result.Tunnels[i].AutoStart != nil {
+			value := *result.Tunnels[i].AutoStart
+			result.Tunnels[i].AutoStart = &value
+		}
+	}
 	return &result
 }
 
@@ -72,7 +78,7 @@ func (cio *ConfigIO) commit(candidate *Config) error {
 	if err := cio.save(candidate); err != nil {
 		return err
 	}
-	cio.config = candidate
+	cio.config = cloneConfig(candidate)
 	return nil
 }
 

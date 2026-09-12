@@ -230,6 +230,14 @@ class TunnelsNotifier extends AsyncNotifier<List<Tunnel>> {
   }
 
   Future<void> start(String name) => _act((c) => c.startTunnel(name));
+
+  Future<List<BatchResult>> batch(String action, List<String> names) async {
+    final client = await ref.read(clientProvider.future);
+    if (client == null) throw StateError('未连接到 daemon');
+    final results = await client.batchTunnels(action, names);
+    await refresh();
+    return results;
+  }
   Future<void> stop(String name) => _act((c) => c.stopTunnel(name));
   Future<void> restart(String name) => _act((c) => c.restartTunnel(name));
   Future<void> remove(String name) => _act((c) => c.deleteTunnel(name));

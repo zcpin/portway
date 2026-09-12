@@ -95,6 +95,11 @@ class DaemonClient {
   Future<void> startTunnel(String name) =>
       _post('/api/tunnels/${Uri.encodeComponent(name)}/start', null);
 
+  Future<List<BatchResult>> batchTunnels(String action, List<String> names) async {
+    final response = await _dio.post('/api/tunnels/batch', data: {'action': action, 'names': names});
+    return (response.data as List).map((value) => BatchResult.fromJson(value)).toList();
+  }
+
   Future<void> stopTunnel(String name) =>
       _post('/api/tunnels/${Uri.encodeComponent(name)}/stop', null);
 

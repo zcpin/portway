@@ -58,6 +58,9 @@ func NewManager(cfg *config.Config, configPath string) (*Manager, error) {
 
 // Start starts all managed tunnels
 func (m *Manager) Start() error {
+	m.updateMu.Lock()
+	defer m.updateMu.Unlock()
+	autoStart := automaticTunnels(m.configIO.GetConfig())
 	logger.Info("Starting %d tunnel(s)...", len(m.tunnels))
 
 	m.mu.Lock()
@@ -65,6 +68,9 @@ func (m *Manager) Start() error {
 
 	// Start all tunnels
 	for name, tun := range m.tunnels {
+		if !autoStart[name] {
+			continue
+		}
 		if err := tun.Start(); err != nil {
 			logger.Error("Failed to start tunnel %s: %v", name, err)
 			// Stop any started tunnels
@@ -287,6 +293,7 @@ func (m *Manager) DeleteTunnel(name string) error {
 // 并停止/启动受影响的隧道。
 func (m *Manager) reloadInternal() error {
 	newCfg := m.configIO.GetConfig()
+	autoStart := automaticTunnels(newCfg)
 	if err := newCfg.Validate(); err != nil {
 		return fmt.Errorf("invalid configuration: %w", err)
 	}
@@ -325,7 +332,7 @@ func (m *Manager) reloadInternal() error {
 
 		if !exists {
 			newTunnels[pt.Name] = newTun
-			if m.running {
+			if m.running && autoStart[pt.Name] {
 				if err := newTun.Start(); err != nil {
 					startErrs = append(startErrs, fmt.Errorf("failed to start new tunnel %s: %w", pt.Name, err))
 				}
@@ -361,6 +368,14 @@ func (m *Manager) reloadInternal() error {
 	m.tunnels = newTunnels
 
 	return errors.Join(startErrs...)
+}
+
+func automaticTunnels(cfg *config.Config) map[string]bool {
+	result := make(map[string]bool, len(cfg.Tunnels))
+	for _, entry := range cfg.Tunnels {
+		result[entry.Name] = entry.AutoStartEnabled()
+	}
+	return result
 }
 
 // Reload reloads the configuration from disk and applies it to the tunnels.

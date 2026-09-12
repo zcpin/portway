@@ -27,6 +27,23 @@ func (s *Server) handleListTunnels(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.app.GetTunnels())
 }
 
+func (s *Server) handleBatchTunnels(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Action string   `json:"action"`
+		Names  []string `json:"names"`
+	}
+	if err := decodeJSON(w, r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	results, err := s.app.BatchTunnels(input.Action, input.Names)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, results)
+}
+
 func (s *Server) handleCreateTunnel(w http.ResponseWriter, r *http.Request) {
 	var t config.Tunnel
 	if err := decodeJSON(w, r, &t); err != nil {

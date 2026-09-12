@@ -134,6 +134,8 @@ WebSocket 连接恢复后，客户端会自动同步完整隧道列表与运行�
 
 隧道卡片显示连接中、已连接、重连中、失败或停止，以及最近错误、重试次数和连接时间。SSH 连接编辑器的「测试连接」会测试当前填写的配置并显示结果，不需要先保存，也不会启动端口转发。
 
+隧道支持分组、搜索和勾选后批量启停，结果会逐条展示。卡片菜单的「复制配置」会生成新名称，并选择一个尚未被配置占用的本地端口，确认后保存。`group` 为可选分组；`auto_start = false` 可关闭随 daemon 启动时自动连接，仍能手动启动，修改该开关不会中断当前连接。旧配置缺省时自动启动。
+
 ## 典型场景：本地连远端 MySQL
 
 私钥**不上传、不复制**，配置里只记录本地文件路径（支持绝对路径、`~` 开头、相对路径）：
@@ -219,6 +221,7 @@ ssh-tunnel-daemon service <动作>       系统服务托管
 | GET | `/api/health` | 健康检查（免认证） |
 | GET | `/api/tunnels` | 隧道列表（含运行状态） |
 | POST | `/api/tunnels` | 新增隧道 |
+| POST | `/api/tunnels/batch` | `action=start/stop`、`names`；返回每条隧道的成功/错误，重复操作幂等 |
 | PUT | `/api/tunnels/{name}` | 更新隧道 |
 | DELETE | `/api/tunnels/{name}` | 删除隧道 |
 | POST | `/api/tunnels/{name}/start` | 启动 |

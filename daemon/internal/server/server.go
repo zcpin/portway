@@ -100,6 +100,7 @@ func (s *Server) routes() http.Handler {
 
 	mux.Handle("GET /api/tunnels", s.auth(http.HandlerFunc(s.handleListTunnels)))
 	mux.Handle("POST /api/tunnels", s.auth(http.HandlerFunc(s.handleCreateTunnel)))
+	mux.Handle("POST /api/tunnels/batch", s.auth(http.HandlerFunc(s.handleBatchTunnels)))
 	mux.Handle("PUT /api/tunnels/{name}", s.auth(http.HandlerFunc(s.handleUpdateTunnel)))
 	mux.Handle("DELETE /api/tunnels/{name}", s.auth(http.HandlerFunc(s.handleDeleteTunnel)))
 	mux.Handle("POST /api/tunnels/{name}/start", s.auth(http.HandlerFunc(s.handleStartTunnel)))

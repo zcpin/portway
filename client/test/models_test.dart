@@ -2,6 +2,29 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ssh_tunnel_client/models.dart';
 
 void main() {
+  test('复制配置保留分组、自动启动和认证字段，重置运行状态', () {
+    final original = Tunnel.fromJson({
+      'name': 'db',
+      'group': 'prod',
+      'auto_start': false,
+      'local_port': 15432,
+      'key_file': 'key',
+      'known_hosts_file': 'hosts',
+      'is_running': true,
+      'state': 'connected',
+      'retry_count': 4,
+    });
+    final copy = original.duplicateAs('db-copy', localPort: 15433);
+    expect(copy.toJson(), {
+      ...original.toJson(),
+      'name': 'db-copy',
+      'local_port': 15433,
+    });
+    expect(copy.isRunning, isFalse);
+    expect(copy.retryCount, 0);
+    expect(copy.autoStart, isFalse);
+    expect(Tunnel.fromJson({}).autoStart, isTrue);
+  });
   test('运行状态独立于配置，更新后保留认证和错误字段', () {
     final tunnel = Tunnel.fromJson({
       'name': 'db',

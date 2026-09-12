@@ -11,10 +11,11 @@ Future<void> openTunnelEditor(
   BuildContext context,
   WidgetRef ref, {
   Tunnel? editing,
+  Tunnel? initial,
 }) async {
   final result = await showDialog<Tunnel>(
     context: context,
-    builder: (_) => TunnelEditorDialog(editing: editing),
+    builder: (_) => TunnelEditorDialog(editing: editing, initial: initial),
   );
   if (result == null || !context.mounted) return;
 
@@ -28,12 +29,28 @@ Future<void> openTunnelEditor(
 }
 
 /// 隧道列表页：展示状态并提供启动/停止/重启/编辑/删除。
-class TunnelsPage extends ConsumerWidget {
+class TunnelsPage extends ConsumerStatefulWidget {
   const TunnelsPage({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<TunnelsPage> createState() => _TunnelsPageState();
+}
+
+class _TunnelsPageState extends ConsumerState<TunnelsPage> {
+  String _query = '';
+  String? _group;
+  final _selected = <String>{};
+  bool _busy = false;
+
+  @override
+  Widget build(BuildContext context) {
     final tunnels = ref.watch(tunnelsProvider);
+    final all = tunnels.valueOrNull ?? <Tunnel>[];
+    final groups = all.map((t) => t.group).toSet().toList()..sort();
+    final group = groups.contains(_group) ? _group : null;
+    final visible = all.where((t) => (group == null || t.group == group) &&
+      '${t.name} ${t.group} ${t.sshHost} ${t.sshConnection} ${t.remoteHost}'.toLowerCase().contains(_query)).toList();
+    final selected = _selected.intersection(visible.map((t) => t.name).toSet());
 
     return Scaffold(
       body: Column(
@@ -55,6 +72,32 @@ class TunnelsPage extends ConsumerWidget {
               ),
             ],
           ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+            child: Wrap(spacing: 12, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
+              SizedBox(width: 250, child: TextField(
+                key: const Key('tunnel-search'),
+                decoration: const InputDecoration(labelText: '搜索名称、主机或分组', prefixIcon: Icon(Icons.search)),
+                onChanged: (value) => setState(() { _query = value.trim().toLowerCase(); _selected.clear(); }),
+              )),
+              SizedBox(width: 150, child: DropdownButton<String?>(
+                value: group, isExpanded: true, hint: const Text('全部分组'),
+                items: [
+                  const DropdownMenuItem<String?>(value: null, child: Text('全部分组')),
+                  for (final value in groups) DropdownMenuItem<String?>(value: value, child: Text(value.isEmpty ? '未分组' : value)),
+                ],
+                onChanged: (value) => setState(() { _group = value; _selected.clear(); }),
+              )),
+              TextButton(onPressed: _busy ? null : () => setState(() {
+                if (selected.length == visible.length) { _selected.clear(); }
+                else { _selected.addAll(visible.map((t) => t.name)); }
+              }), child: Text('选择全部（${selected.length}/${visible.length}）')),
+              FilledButton.tonalIcon(onPressed: _busy || selected.isEmpty ? null : () => _batch('start', selected),
+                icon: const Icon(Icons.play_arrow), label: const Text('批量启动')),
+              OutlinedButton.icon(onPressed: _busy || selected.isEmpty ? null : () => _batch('stop', selected),
+                icon: const Icon(Icons.stop), label: Text(_busy ? '处理中…' : '批量停止')),
+            ]),
+          ),
           Expanded(
             child: tunnels.when(
               loading: () => const Center(child: CircularProgressIndicator()),
@@ -63,18 +106,22 @@ class TunnelsPage extends ConsumerWidget {
                 onRetry: () => ref.read(tunnelsProvider.notifier).refresh(),
               ),
               data: (list) {
-                if (list.isEmpty) {
-                  return const EmptyView(
+                if (visible.isEmpty) {
+                  return EmptyView(
                     icon: Icons.swap_horiz_outlined,
-                    message: '还没有隧道，点击右上角新建',
+                    message: list.isEmpty ? '还没有隧道，点击右上角新建' : '没有匹配的隧道',
                   );
                 }
                 return ListView.builder(
                   padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
-                  itemCount: list.length,
+                  itemCount: visible.length,
                   itemBuilder: (context, i) => Padding(
                     padding: const EdgeInsets.only(bottom: 12),
-                    child: TunnelCard(tunnel: list[i]),
+                    child: TunnelCard(tunnel: visible[i], selected: selected.contains(visible[i].name),
+                      onSelected: _busy ? null : (value) => setState(() {
+                        if (value == true) { _selected.add(visible[i].name); }
+                        else { _selected.remove(visible[i].name); }
+                      })),
                   ),
                 );
               },
@@ -84,12 +131,37 @@ class TunnelsPage extends ConsumerWidget {
       ),
     );
   }
+
+  Future<void> _batch(String action, Set<String> names) async {
+    setState(() => _busy = true);
+    try {
+      final results = await ref.read(tunnelsProvider.notifier).batch(action, names.toList());
+      if (!mounted) return;
+      setState(_selected.clear);
+      await showDialog<void>(context: context, builder: (context) => AlertDialog(
+        title: const Text('批量操作结果'),
+        content: SizedBox(width: 440, height: 300, child: ListView(children: [
+          for (final result in results) ListTile(
+            leading: Icon(result.ok ? Icons.check_circle_outline : Icons.error_outline),
+            title: Text(result.name), subtitle: Text(result.ok ? '已完成' : result.error),
+          ),
+        ])),
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('关闭'))],
+      ));
+    } catch (error) {
+      if (mounted) showErrorSnack(context, error);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
 }
 
 class TunnelCard extends ConsumerWidget {
-  const TunnelCard({super.key, required this.tunnel});
+  const TunnelCard({super.key, required this.tunnel, this.selected = false, this.onSelected});
 
   final Tunnel tunnel;
+  final bool selected;
+  final ValueChanged<bool?>? onSelected;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -110,6 +182,7 @@ class TunnelCard extends ConsumerWidget {
           children: [
             Row(
               children: [
+                if (onSelected != null) Checkbox(value: selected, onChanged: onSelected),
                 Icon(Icons.circle, size: 10, color: statusColor),
                 const SizedBox(width: 10),
                 Text(tunnel.name, style: theme.textTheme.titleMedium),
@@ -157,6 +230,18 @@ class TunnelCard extends ConsumerWidget {
                   onSelected: (v) async {
                     if (v == 'edit') {
                       await openTunnelEditor(context, ref, editing: tunnel);
+                    } else if (v == 'copy') {
+                      final all = ref.read(tunnelsProvider).valueOrNull ?? [];
+                      final names = all.map((t) => t.name).toSet();
+                      var name = '${tunnel.name}-copy';
+                      for (var i = 2; names.contains(name); i++) { name = '${tunnel.name}-copy-$i'; }
+                      final ports = all.map((t) => t.localPort).toSet();
+                      var port = tunnel.localPort;
+                      for (var i = 0; i < 65535; i++) {
+                        port = port >= 65535 ? 1024 : port + 1;
+                        if (!ports.contains(port)) break;
+                      }
+                      await openTunnelEditor(context, ref, initial: tunnel.duplicateAs(name, localPort: port));
                     } else if (v == 'delete') {
                       final ok = await confirmDelete(context, tunnel.name);
                       if (ok && context.mounted) {
@@ -167,6 +252,7 @@ class TunnelCard extends ConsumerWidget {
                   },
                   itemBuilder: (_) => const [
                     PopupMenuItem(value: 'edit', child: Text('编辑')),
+                    PopupMenuItem(value: 'copy', child: Text('复制配置')),
                     PopupMenuItem(value: 'delete', child: Text('删除')),
                   ],
                 ),
@@ -177,6 +263,8 @@ class TunnelCard extends ConsumerWidget {
               spacing: 28,
               runSpacing: 10,
               children: [
+                if (tunnel.group.isNotEmpty) InfoField(label: '分组', value: tunnel.group),
+                InfoField(label: '自动启动', value: tunnel.autoStart ? '开启' : '关闭'),
                 InfoField(label: '本地端口', value: '${tunnel.localPort}'),
                 InfoField(
                     label: '远端',
@@ -241,9 +329,10 @@ class InfoField extends StatelessWidget {
 
 /// 隧道编辑/新建对话框。
 class TunnelEditorDialog extends ConsumerStatefulWidget {
-  const TunnelEditorDialog({super.key, this.editing});
+  const TunnelEditorDialog({super.key, this.editing, this.initial});
 
   final Tunnel? editing;
+  final Tunnel? initial;
 
   @override
   ConsumerState<TunnelEditorDialog> createState() => _TunnelEditorState();
@@ -252,6 +341,8 @@ class TunnelEditorDialog extends ConsumerStatefulWidget {
 class _TunnelEditorState extends ConsumerState<TunnelEditorDialog> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _name;
+  late final TextEditingController _group;
+  bool _autoStart = true;
   late final TextEditingController _localPort;
   late final TextEditingController _remoteHost;
   late final TextEditingController _remotePort;
@@ -269,8 +360,10 @@ class _TunnelEditorState extends ConsumerState<TunnelEditorDialog> {
   @override
   void initState() {
     super.initState();
-    final t = widget.editing;
+    final t = widget.editing ?? widget.initial;
     _name = TextEditingController(text: t?.name ?? '');
+    _group = TextEditingController(text: t?.group ?? '');
+    _autoStart = t?.autoStart ?? true;
     _localPort = TextEditingController(
         text: t != null && t.localPort > 0 ? '${t.localPort}' : '');
     _remoteHost = TextEditingController(text: t?.remoteHost ?? '127.0.0.1');
@@ -291,6 +384,7 @@ class _TunnelEditorState extends ConsumerState<TunnelEditorDialog> {
   void dispose() {
     for (final c in [
       _name,
+      _group,
       _localPort,
       _remoteHost,
       _remotePort,
@@ -327,6 +421,11 @@ class _TunnelEditorState extends ConsumerState<TunnelEditorDialog> {
                   validator: (v) =>
                       (v == null || v.trim().isEmpty) ? '请填写名称' : null,
                 ),
+                const SizedBox(height: 12),
+                TextFormField(controller: _group, decoration: const InputDecoration(labelText: '分组（可选）')),
+                SwitchListTile(contentPadding: EdgeInsets.zero, title: const Text('随 daemon 自动启动'),
+                  subtitle: const Text('关闭后可手动启动；修改此项不会中断当前连接'),
+                  value: _autoStart, onChanged: (value) => setState(() => _autoStart = value)),
                 const SizedBox(height: 12),
                 Row(
                   children: [
@@ -470,6 +569,8 @@ class _TunnelEditorState extends ConsumerState<TunnelEditorDialog> {
 
     final tunnel = Tunnel(
       name: _name.text.trim(),
+      group: _group.text.trim(),
+      autoStart: _autoStart,
       localPort: int.parse(_localPort.text.trim()),
       remoteHost: _remoteHost.text.trim(),
       remotePort: int.parse(_remotePort.text.trim()),
@@ -477,8 +578,8 @@ class _TunnelEditorState extends ConsumerState<TunnelEditorDialog> {
       sshHost: _sshConnection == null ? _sshHost.text.trim() : '',
       sshUser: _sshConnection == null ? _sshUser.text.trim() : '',
       keyFile: _sshConnection == null ? _keyFile.text.trim() : '',
-      hostKeyCheck: widget.editing?.hostKeyCheck ?? '',
-      knownHostsFile: widget.editing?.knownHostsFile ?? '',
+      hostKeyCheck: (widget.editing ?? widget.initial)?.hostKeyCheck ?? '',
+      knownHostsFile: (widget.editing ?? widget.initial)?.knownHostsFile ?? '',
       reconnectStrategy: _strategy,
       reconnectInterval: _interval.text.trim(),
       maxReconnectAttempts: int.tryParse(_maxAttempts.text.trim()) ?? 0,
