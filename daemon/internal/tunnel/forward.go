@@ -1,6 +1,7 @@
 package tunnel
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -14,6 +15,9 @@ type Forwarder struct {
 	localAddr  string
 	remoteAddr string
 	sshClient  sshConn
+	mode       string
+	ctx        context.Context
+	cancel     context.CancelFunc
 	stopChan   chan struct{}
 	// done 在 accept 循环退出时关闭，供调用方感知 listener 意外终止
 	done     chan struct{}
@@ -26,8 +30,14 @@ type Forwarder struct {
 	conns    []net.Conn
 }
 
-func NewForwarder(tunnelName, localHost, localPort, remoteHost, remotePort string, sshClient sshConn) *Forwarder {
+func NewForwarder(tunnelName, localHost, localPort, remoteHost, remotePort string, sshClient sshConn, modes ...string) *Forwarder {
+	mode := "local"
+	if len(modes) != 0 && modes[0] != "" {
+		mode = modes[0]
+	}
+	ctx, cancel := context.WithCancel(context.Background())
 	return &Forwarder{
+		mode: mode, ctx: ctx, cancel: cancel,
 		tunnelName: tunnelName,
 		localAddr:  net.JoinHostPort(localHost, localPort),
 		remoteAddr: net.JoinHostPort(remoteHost, remotePort),
@@ -43,12 +53,27 @@ func (f *Forwarder) Done() <-chan struct{} {
 }
 
 func (f *Forwarder) Start() error {
-	listener, err := net.Listen("tcp", f.localAddr)
+	var listener net.Listener
+	var err error
+	switch f.mode {
+	case "local", "dynamic":
+		listener, err = net.Listen("tcp", f.localAddr)
+	case "remote":
+		remote, ok := f.sshClient.(interface {
+			Listen(string, string) (net.Listener, error)
+		})
+		if !ok {
+			return fmt.Errorf("SSH transport does not support remote forwarding")
+		}
+		listener, err = remote.Listen("tcp", f.remoteAddr)
+	default:
+		return fmt.Errorf("unsupported forwarding mode %q", f.mode)
+	}
 	if err != nil {
-		return fmt.Errorf("failed to listen on %s: %w", f.localAddr, err)
+		return fmt.Errorf("failed to start %s listener: %w", f.mode, err)
 	}
 
-	logger.Info("[%s] Listening on %s, forwarding to %s", f.tunnelName, f.localAddr, f.remoteAddr)
+	logger.Info("[%s] %s listener ready on %s", f.tunnelName, f.mode, listener.Addr())
 
 	// 与 Stop 互斥：若 Stop 先执行，就不能再启动 accept 循环；
 	// 否则 wg.Add 会与 Stop 里的 wg.Wait 并发，属于 WaitGroup 误用
@@ -122,9 +147,9 @@ func (f *Forwarder) handleConnection(localConn net.Conn) {
 	}
 	defer f.untrackConn(localConn)
 
-	remoteConn, err := f.sshClient.Dial("tcp", f.remoteAddr)
+	remoteConn, err := f.connectTarget(localConn)
 	if err != nil {
-		logger.Error("[%s] Failed to dial remote %s: %v", f.tunnelName, f.remoteAddr, err)
+		logger.Error("[%s] %s forwarding failed: %v", f.tunnelName, f.mode, err)
 		return
 	}
 	defer remoteConn.Close()
@@ -168,6 +193,9 @@ func (f *Forwarder) Stop() {
 	f.stopOnce.Do(func() {
 		f.mu.Lock()
 		close(f.stopChan)
+		if f.cancel != nil {
+			f.cancel()
+		}
 		listener := f.listener
 		conns := f.conns
 		f.conns = nil

@@ -3,6 +3,7 @@ package manager
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 
 	"github.com/byteporter/ssh-tunnel/internal/config"
@@ -411,6 +412,7 @@ func (m *Manager) Reload(configPath string) error {
 
 func parsedTunnelEqual(a, b config.ParsedTunnel) bool {
 	return a.Name == b.Name &&
+		a.Mode == b.Mode && a.LocalHost == b.LocalHost && slices.Equal(a.Jumps, b.Jumps) &&
 		a.LocalPort == b.LocalPort &&
 		a.RemoteHost == b.RemoteHost &&
 		a.RemotePort == b.RemotePort &&

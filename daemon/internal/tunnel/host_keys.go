@@ -31,14 +31,19 @@ var hostTrustMu sync.Mutex
 var errHostKeyCaptured = errors.New("host key captured")
 
 // Scan only reaches host verification and never sends user credentials.
-func scanHostKey(ctx context.Context, cfg config.ParsedTunnel) (ssh.PublicKey, net.Addr, error) {
+func scanHostKey(ctx context.Context, cfg config.ParsedTunnel, keys ...*KeyStore) (ssh.PublicKey, net.Addr, error) {
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", cfg.SSHHost)
+	dialer := &Tunnel{config: cfg, agentDial: dialSSHAgent}
+	if len(keys) != 0 {
+		dialer.keys = keys[0]
+	}
+	conn, hops, err := dialer.dialTarget(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
 	defer conn.Close()
+	defer closeHops(hops)
 	stopClose := context.AfterFunc(ctx, func() { conn.Close() })
 	defer stopClose()
 	var key ssh.PublicKey
@@ -118,8 +123,8 @@ func hostKeyStatus(cfg config.ParsedTunnel, key ssh.PublicKey, remote net.Addr) 
 	return info, data, mismatch.Want, nil
 }
 
-func InspectHostKey(ctx context.Context, cfg config.ParsedTunnel) (HostKeyInfo, error) {
-	key, remote, err := scanHostKey(ctx, cfg)
+func InspectHostKey(ctx context.Context, cfg config.ParsedTunnel, keys ...*KeyStore) (HostKeyInfo, error) {
+	key, remote, err := scanHostKey(ctx, cfg, keys...)
 	if err != nil {
 		return HostKeyInfo{}, err
 	}
@@ -127,11 +132,11 @@ func InspectHostKey(ctx context.Context, cfg config.ParsedTunnel) (HostKeyInfo, 
 	return info, err
 }
 
-func TrustHostKey(ctx context.Context, cfg config.ParsedTunnel, fingerprint string, replace bool) (HostKeyInfo, error) {
+func TrustHostKey(ctx context.Context, cfg config.ParsedTunnel, fingerprint string, replace bool, keys ...*KeyStore) (HostKeyInfo, error) {
 	if fingerprint == "" {
 		return HostKeyInfo{}, errors.New("confirmed fingerprint is required")
 	}
-	key, remote, err := scanHostKey(ctx, cfg)
+	key, remote, err := scanHostKey(ctx, cfg, keys...)
 	if err != nil {
 		return HostKeyInfo{}, err
 	}

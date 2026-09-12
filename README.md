@@ -176,7 +176,37 @@ SSH 连接和直连隧道编辑器均可选择私钥文件或 **SSH agent** 认�
 
 带口令的私钥可在编辑器或「密钥」页解锁。口令只用于本次解锁，解析后的密钥保存在 daemon 内存；daemon 重启后需要再次解锁。锁定影响后续认证，已建立的连接继续运行，原私钥文件不会被改写。
 
-编辑器的「查看主机指纹」只探测主机公钥；确认信任后会再次核对指纹再写入指定 known_hosts，并启用校验。主机密钥变化时需要明确选择「替换并信任」，其他主机的信任记录会保留。
+编辑器的「查看主机指纹」只探测目标主机公钥；经过跳板时先按配置认证跳板。确认信任后会再次核对指纹再写入指定 known_hosts，并启用校验。主机密钥变化时需要明确选择「替换并信任」，其他主机的信任记录会保留。
+
+### 转发类型与跳板
+
+`mode` 缺省为 `local`，保持原来的本地端口转发。`remote` 把远端监听端口转发到本机目标；`dynamic` 提供 SOCKS5 CONNECT 代理，支持 IPv4、IPv6 和由 SSH 服务端解析的域名，不支持 UDP。`local_host` 缺省为 `127.0.0.1`，本地和动态代理监听仅允许回环地址。
+
+```toml
+[[tunnels]]
+name = "reverse-web"
+mode = "remote"
+ssh_connection = "prod-server"
+local_host = "127.0.0.1"
+local_port = 8080
+remote_host = "127.0.0.1"
+remote_port = 18080
+
+[[tunnels]]
+name = "socks-proxy"
+mode = "dynamic"
+ssh_connection = "prod-server"
+local_port = 1080
+
+[[ssh_connections]]
+name = "internal-host"
+host = "10.0.0.2:22"
+user = "alice"
+key_file = "~/.ssh/id_ed25519"
+proxy_jump = ["prod-server"]
+```
+
+`proxy_jump` 可设置在 SSH 连接或直连隧道上，按顺序引用 SSH 连接名称；编辑器中每行填写一个名称。引用连接自身的跳板链会展开，重复、循环、缺失引用以及超过 8 跳的链会被拒绝。每个跳板使用自身的认证和主机校验配置；连接超时覆盖完整链，停止隧道时会关闭所有跳板。反向监听是否允许由远端 SSH 服务的转发策略决定。
 
 ## 客户端托盘
 
@@ -237,7 +267,7 @@ ssh-tunnel-daemon service <动作>       系统服务托管
 | POST | `/api/tunnels/{name}/restart` | 重启 |
 | GET/POST/PUT/DELETE | `/api/ssh-connections[/{name}]` | SSH 连接增删改查 |
 | POST | `/api/ssh-connections/test` | 测试待保存 SSH 配置，返回 `ok`、`elapsed_ms` 和错误 |
-| POST | `/api/ssh-connections/host-key` | 查看待保存连接的主机指纹，不发送认证凭据 |
+| POST | `/api/ssh-connections/host-key` | 查看目标主机指纹，跳板按配置认证，目标不发送认证凭据 |
 | POST | `/api/ssh-connections/trust` | 确认 `connection`、`fingerprint`，变更密钥需 `replace=true` |
 | GET | `/api/keys` | 配置中引用的私钥列表（含是否存在） |
 | GET | `/api/keys/stat?path=<路径>` | 校验私钥路径对 daemon 是否可读 |

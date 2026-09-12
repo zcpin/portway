@@ -114,6 +114,7 @@ class _ConnectionCard extends ConsumerWidget {
             children: [
               Text('${connection.user}@${connection.host}'),
               Text(connection.authMethod == 'agent' ? '认证：SSH agent' : '密钥：${connection.keyFile}'),
+              if (connection.proxyJump.isNotEmpty) Text('跳板：${connection.proxyJump.join(' → ')}'),
             ],
           ),
         ),
@@ -164,6 +165,7 @@ class _ConnectionEditorState extends ConsumerState<ConnectionEditorDialog> {
   late final TextEditingController _keyFile;
   late final TextEditingController _agentSocket;
   late final TextEditingController _knownHosts;
+  late final TextEditingController _proxyJump;
   String _authMethod = 'key';
   String _hostKeyCheck = '';
 
@@ -182,6 +184,7 @@ class _ConnectionEditorState extends ConsumerState<ConnectionEditorDialog> {
     _keyFile = TextEditingController(text: c?.keyFile ?? '');
     _agentSocket = TextEditingController(text: c?.agentSocket ?? '');
     _knownHosts = TextEditingController(text: c?.knownHostsFile ?? '');
+    _proxyJump = TextEditingController(text: c?.proxyJump.join('\n') ?? '');
     _authMethod = c?.authMethod == 'agent' ? 'agent' : 'key';
     _hostKeyCheck = c?.hostKeyCheck ?? '';
 
@@ -194,7 +197,7 @@ class _ConnectionEditorState extends ConsumerState<ConnectionEditorDialog> {
   @override
   void dispose() {
     _testCancel?.cancel();
-    for (final c in [_name, _host, _user, _keyFile, _agentSocket, _knownHosts]) {
+    for (final c in [_name, _host, _user, _keyFile, _agentSocket, _knownHosts, _proxyJump]) {
       c.dispose();
     }
     super.dispose();
@@ -225,6 +228,9 @@ class _ConnectionEditorState extends ConsumerState<ConnectionEditorDialog> {
               items: const [DropdownMenuItem(value: 'key', child: Text('私钥文件')),
                 DropdownMenuItem(value: 'agent', child: Text('SSH agent'))],
               onChanged: (value) => setState(() => _authMethod = value!)),
+            const SizedBox(height: 12),
+            TextFormField(controller: _proxyJump, minLines: 1, maxLines: 3,
+              decoration: const InputDecoration(labelText: '跳板链（每行一个 SSH 连接名）')),
             const SizedBox(height: 12),
             if (_authMethod == 'key') ...[
               Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -326,6 +332,7 @@ class _ConnectionEditorState extends ConsumerState<ConnectionEditorDialog> {
         keyFile: _keyFile.text.trim(),
         authMethod: _authMethod,
         agentSocket: _agentSocket.text.trim(),
+        proxyJump: parseJumpNames(_proxyJump.text),
         hostKeyCheck: _hostKeyCheck,
         knownHostsFile: _knownHosts.text.trim(),
       );

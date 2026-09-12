@@ -50,7 +50,7 @@ class _TunnelsPageState extends ConsumerState<TunnelsPage> {
     final groups = all.map((t) => t.group).toSet().toList()..sort();
     final group = groups.contains(_group) ? _group : null;
     final visible = all.where((t) => (group == null || t.group == group) &&
-      '${t.name} ${t.group} ${t.sshHost} ${t.sshConnection} ${t.remoteHost}'.toLowerCase().contains(_query)).toList();
+      '${t.name} ${t.group} ${t.sshHost} ${t.sshConnection} ${t.remoteHost} ${t.localHost} ${t.modeLabel} ${t.proxyJump.join(' ')}'.toLowerCase().contains(_query)).toList();
     final selected = _selected.intersection(visible.map((t) => t.name).toSet());
 
     return Scaffold(
@@ -58,7 +58,7 @@ class _TunnelsPageState extends ConsumerState<TunnelsPage> {
         children: [
           PageHeader(
             title: '隧道',
-            subtitle: '把远端端口映射到本地，所有隧道由 daemon 统一维护',
+            subtitle: '管理本地转发、反向转发和 SOCKS5 代理',
             actions: [
               FilledButton.icon(
                 onPressed: () => openTunnelEditor(context, ref),
@@ -236,13 +236,15 @@ class TunnelCard extends ConsumerWidget {
                       final names = all.map((t) => t.name).toSet();
                       var name = '${tunnel.name}-copy';
                       for (var i = 2; names.contains(name); i++) { name = '${tunnel.name}-copy-$i'; }
-                      final ports = all.map((t) => t.localPort).toSet();
-                      var port = tunnel.localPort;
+                      final reverse = tunnel.mode == 'remote';
+                      final ports = all.map((t) => reverse ? t.remotePort : t.localPort).toSet();
+                      var port = reverse ? tunnel.remotePort : tunnel.localPort;
                       for (var i = 0; i < 65535; i++) {
                         port = port >= 65535 ? 1024 : port + 1;
                         if (!ports.contains(port)) break;
                       }
-                      await openTunnelEditor(context, ref, initial: tunnel.duplicateAs(name, localPort: port));
+                      await openTunnelEditor(context, ref, initial: tunnel.duplicateAs(name,
+                        localPort: reverse ? null : port, remotePort: reverse ? port : null));
                     } else if (v == 'delete') {
                       final ok = await confirmDelete(context, tunnel.name);
                       if (ok && context.mounted) {
@@ -266,10 +268,12 @@ class TunnelCard extends ConsumerWidget {
               children: [
                 if (tunnel.group.isNotEmpty) InfoField(label: '分组', value: tunnel.group),
                 InfoField(label: '自动启动', value: tunnel.autoStart ? '开启' : '关闭'),
-                InfoField(label: '本地端口', value: '${tunnel.localPort}'),
+                InfoField(label: '类型', value: tunnel.modeLabel),
+                InfoField(label: tunnel.mode == 'remote' ? '本机目标' : '本地监听',
+                  value: _endpoint(tunnel.localHost, tunnel.localPort)),
                 InfoField(
-                    label: '远端',
-                    value: '${tunnel.remoteHost}:${tunnel.remotePort}'),
+                    label: tunnel.mode == 'remote' ? '远端监听' : '远端目标',
+                    value: tunnel.mode == 'dynamic' ? '由 SOCKS5 请求指定' : _endpoint(tunnel.remoteHost, tunnel.remotePort)),
                 InfoField(
                   label: 'SSH',
                   value: tunnel.sshConnection.isNotEmpty
@@ -328,6 +332,9 @@ class InfoField extends StatelessWidget {
   }
 }
 
+String _endpoint(String host, int port) => host.contains(':') && !host.startsWith('[')
+    ? '[$host]:$port' : '$host:$port';
+
 /// 隧道编辑/新建对话框。
 class TunnelEditorDialog extends ConsumerStatefulWidget {
   const TunnelEditorDialog({super.key, this.editing, this.initial});
@@ -345,6 +352,9 @@ class _TunnelEditorState extends ConsumerState<TunnelEditorDialog> {
   late final TextEditingController _group;
   bool _autoStart = true;
   late final TextEditingController _localPort;
+  late final TextEditingController _localHost;
+  late final TextEditingController _proxyJump;
+  String _mode = 'local';
   late final TextEditingController _remoteHost;
   late final TextEditingController _remotePort;
   late final TextEditingController _sshHost;
@@ -370,6 +380,9 @@ class _TunnelEditorState extends ConsumerState<TunnelEditorDialog> {
     _name = TextEditingController(text: t?.name ?? '');
     _group = TextEditingController(text: t?.group ?? '');
     _autoStart = t?.autoStart ?? true;
+    _mode = t?.mode ?? 'local';
+    _localHost = TextEditingController(text: t?.localHost ?? '127.0.0.1');
+    _proxyJump = TextEditingController(text: t?.proxyJump.join('\n') ?? '');
     _localPort = TextEditingController(
         text: t != null && t.localPort > 0 ? '${t.localPort}' : '');
     _remoteHost = TextEditingController(text: t?.remoteHost ?? '127.0.0.1');
@@ -396,6 +409,8 @@ class _TunnelEditorState extends ConsumerState<TunnelEditorDialog> {
       _name,
       _group,
       _localPort,
+      _localHost,
+      _proxyJump,
       _remoteHost,
       _remotePort,
       _sshHost,
@@ -438,6 +453,16 @@ class _TunnelEditorState extends ConsumerState<TunnelEditorDialog> {
                 SwitchListTile(contentPadding: EdgeInsets.zero, title: const Text('随 daemon 自动启动'),
                   subtitle: const Text('关闭后可手动启动；修改此项不会中断当前连接'),
                   value: _autoStart, onChanged: (value) => setState(() => _autoStart = value)),
+                DropdownButtonFormField<String>(initialValue: _mode,
+                  decoration: const InputDecoration(labelText: '转发类型'),
+                  items: const [DropdownMenuItem(value: 'local', child: Text('本地转发')),
+                    DropdownMenuItem(value: 'remote', child: Text('反向转发')),
+                    DropdownMenuItem(value: 'dynamic', child: Text('SOCKS5 代理'))],
+                  onChanged: (mode) => setState(() => _mode = mode!)),
+                const SizedBox(height: 12),
+                TextFormField(controller: _localHost,
+                  decoration: InputDecoration(labelText: _mode == 'remote' ? '本机目标主机 *' : '本地监听地址 *'),
+                  validator: (value) => (value == null || value.trim().isEmpty) ? '请填写地址' : null),
                 const SizedBox(height: 12),
                 Row(
                   children: [
@@ -445,18 +470,19 @@ class _TunnelEditorState extends ConsumerState<TunnelEditorDialog> {
                       child: TextFormField(
                         controller: _localPort,
                         decoration:
-                            const InputDecoration(labelText: '本地端口 *'),
+                            InputDecoration(labelText: _mode == 'remote' ? '本机目标端口 *' : '本地端口 *'),
                         keyboardType: TextInputType.number,
                         validator: (v) =>
                             int.tryParse(v ?? '') == null ? '请填写有效端口' : null,
                       ),
                     ),
+                    if (_mode != 'dynamic') ...[
                     const SizedBox(width: 12),
                     Expanded(
                       child: TextFormField(
                         controller: _remoteHost,
                         decoration:
-                            const InputDecoration(labelText: '远端主机 *'),
+                            InputDecoration(labelText: _mode == 'remote' ? '远端监听主机 *' : '远端主机 *'),
                         validator: (v) =>
                             (v == null || v.trim().isEmpty) ? '请填写' : null,
                       ),
@@ -466,12 +492,13 @@ class _TunnelEditorState extends ConsumerState<TunnelEditorDialog> {
                       child: TextFormField(
                         controller: _remotePort,
                         decoration:
-                            const InputDecoration(labelText: '远端端口 *'),
+                            InputDecoration(labelText: _mode == 'remote' ? '远端监听端口 *' : '远端端口 *'),
                         keyboardType: TextInputType.number,
                         validator: (v) =>
                             int.tryParse(v ?? '') == null ? '请填写有效端口' : null,
                       ),
                     ),
+                    ],
                   ],
                 ),
                 if (connections.isNotEmpty) ...[
@@ -491,6 +518,9 @@ class _TunnelEditorState extends ConsumerState<TunnelEditorDialog> {
                   ),
                 ],
                 if (!useReference) ...[
+                  const SizedBox(height: 12),
+                  TextFormField(controller: _proxyJump, minLines: 1, maxLines: 3,
+                    decoration: const InputDecoration(labelText: '跳板链（每行一个 SSH 连接名）')),
                   const SizedBox(height: 12),
                   Row(
                     children: [
@@ -604,9 +634,12 @@ class _TunnelEditorState extends ConsumerState<TunnelEditorDialog> {
       name: _name.text.trim(),
       group: _group.text.trim(),
       autoStart: _autoStart,
+      mode: _mode,
+      localHost: _localHost.text.trim(),
+      proxyJump: parseJumpNames(_proxyJump.text),
       localPort: int.parse(_localPort.text.trim()),
-      remoteHost: _remoteHost.text.trim(),
-      remotePort: int.parse(_remotePort.text.trim()),
+      remoteHost: _mode == 'dynamic' ? '' : _remoteHost.text.trim(),
+      remotePort: _mode == 'dynamic' ? 0 : int.parse(_remotePort.text.trim()),
       sshConnection: _sshConnection ?? '',
       sshHost: _sshConnection == null ? _sshHost.text.trim() : '',
       sshUser: _sshConnection == null ? _sshUser.text.trim() : '',
@@ -630,7 +663,8 @@ class _TunnelEditorState extends ConsumerState<TunnelEditorDialog> {
     final trusted = await inspectAndTrustHostKey(context, ref, SshConnection(
       name: _name.text.trim(), host: _sshHost.text.trim(), user: _sshUser.text.trim(),
       keyFile: _keyFile.text.trim(), authMethod: _authMethod,
-      agentSocket: _agentSocket.text.trim(), hostKeyCheck: _hostKeyCheck, knownHostsFile: _knownHosts.text.trim()));
+      agentSocket: _agentSocket.text.trim(), proxyJump: parseJumpNames(_proxyJump.text),
+      hostKeyCheck: _hostKeyCheck, knownHostsFile: _knownHosts.text.trim()));
     if (mounted) setState(() { _securityBusy = false; if (trusted) _hostKeyCheck = 'known_hosts'; });
   }
 }

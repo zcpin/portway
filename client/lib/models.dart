@@ -5,6 +5,9 @@ class Tunnel {
   final String name;
   final String group;
   final bool autoStart;
+  final String mode;
+  final String localHost;
+  final List<String> proxyJump;
   final int localPort;
   final String remoteHost;
   final int remotePort;
@@ -29,6 +32,9 @@ class Tunnel {
     required this.name,
     this.group = '',
     this.autoStart = true,
+    this.mode = 'local',
+    this.localHost = '127.0.0.1',
+    this.proxyJump = const [],
     required this.localPort,
     required this.remoteHost,
     required this.remotePort,
@@ -54,6 +60,9 @@ class Tunnel {
         name: j['name'] as String? ?? '',
         group: j['group'] as String? ?? '',
         autoStart: j['auto_start'] as bool? ?? true,
+        mode: j['mode'] as String? ?? 'local',
+        localHost: j['local_host'] as String? ?? '127.0.0.1',
+        proxyJump: List<String>.unmodifiable((j['proxy_jump'] as List? ?? []).cast<String>()),
         localPort: _asInt(j['local_port']),
         remoteHost: j['remote_host'] as String? ?? '',
         remotePort: _asInt(j['remote_port']),
@@ -79,6 +88,9 @@ class Tunnel {
         'name': name,
         if (group.isNotEmpty) 'group': group,
         if (!autoStart) 'auto_start': false,
+        if (mode != 'local') 'mode': mode,
+        if (localHost != '127.0.0.1') 'local_host': localHost,
+        if (proxyJump.isNotEmpty) 'proxy_jump': proxyJump,
         'local_port': localPort,
         'remote_host': remoteHost,
         'remote_port': remotePort,
@@ -104,9 +116,12 @@ class Tunnel {
         _ => isRunning ? '运行中' : '已停止',
       };
 
-  Tunnel duplicateAs(String name, {int? localPort}) => Tunnel.fromJson({
+  Tunnel duplicateAs(String name, {int? localPort, int? remotePort}) => Tunnel.fromJson({
         ...toJson(), 'name': name, 'local_port': localPort ?? this.localPort,
+        'remote_port': remotePort ?? this.remotePort,
       });
+
+  String get modeLabel => switch (mode) { 'remote' => '反向转发', 'dynamic' => 'SOCKS5 代理', _ => '本地转发' };
 
   Tunnel copyWith({
     bool? isRunning,
@@ -118,6 +133,9 @@ class Tunnel {
         name: name,
         group: group,
         autoStart: autoStart,
+        mode: mode,
+        localHost: localHost,
+        proxyJump: proxyJump,
         localPort: localPort,
         remoteHost: remoteHost,
         remotePort: remotePort,
@@ -241,6 +259,7 @@ class SshConnection {
   final String keyFile;
   final String authMethod;
   final String agentSocket;
+  final List<String> proxyJump;
   final String hostKeyCheck;
   final String knownHostsFile;
 
@@ -251,6 +270,7 @@ class SshConnection {
     required this.keyFile,
     this.authMethod = 'key',
     this.agentSocket = '',
+    this.proxyJump = const [],
     this.hostKeyCheck = '',
     this.knownHostsFile = '',
   });
@@ -262,6 +282,7 @@ class SshConnection {
         keyFile: j['key_file'] as String? ?? '',
         authMethod: j['auth_method'] as String? ?? 'key',
         agentSocket: j['agent_socket'] as String? ?? '',
+        proxyJump: List<String>.unmodifiable((j['proxy_jump'] as List? ?? []).cast<String>()),
         hostKeyCheck: j['host_key_check'] as String? ?? '',
         knownHostsFile: j['known_hosts_file'] as String? ?? '',
       );
@@ -273,6 +294,7 @@ class SshConnection {
         'key_file': keyFile,
         if (authMethod == 'agent') 'auth_method': authMethod,
         if (agentSocket.isNotEmpty) 'agent_socket': agentSocket,
+        if (proxyJump.isNotEmpty) 'proxy_jump': proxyJump,
         if (hostKeyCheck.isNotEmpty) 'host_key_check': hostKeyCheck,
         if (knownHostsFile.isNotEmpty) 'known_hosts_file': knownHostsFile,
       };

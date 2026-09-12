@@ -39,12 +39,13 @@ type GlobalSettings struct {
 
 // SSHConnection represents a reusable SSH connection configuration
 type SSHConnection struct {
-	Name        string `toml:"name" json:"name"`
-	Host        string `toml:"host" json:"host"`
-	User        string `toml:"user" json:"user"`
-	KeyFile     string `toml:"key_file" json:"key_file"`
-	AuthMethod  string `toml:"auth_method,omitempty" json:"auth_method,omitempty"`
-	AgentSocket string `toml:"agent_socket,omitempty" json:"agent_socket,omitempty"`
+	Name        string   `toml:"name" json:"name"`
+	Host        string   `toml:"host" json:"host"`
+	User        string   `toml:"user" json:"user"`
+	KeyFile     string   `toml:"key_file" json:"key_file"`
+	AuthMethod  string   `toml:"auth_method,omitempty" json:"auth_method,omitempty"`
+	AgentSocket string   `toml:"agent_socket,omitempty" json:"agent_socket,omitempty"`
+	ProxyJump   []string `toml:"proxy_jump,omitempty" json:"proxy_jump,omitempty"`
 	// HostKeyCheck 控制主机密钥校验：known_hosts（默认）或 insecure（不校验）
 	HostKeyCheck string `toml:"host_key_check,omitempty" json:"host_key_check,omitempty"`
 	// KnownHostsFile 指定 known_hosts 文件；留空时用 ~/.ssh/known_hosts
@@ -56,22 +57,25 @@ type Tunnel struct {
 	Name       string `toml:"name" json:"name"`
 	Group      string `toml:"group,omitempty" json:"group,omitempty"`
 	AutoStart  *bool  `toml:"auto_start" json:"auto_start,omitempty"`
+	Mode       string `toml:"mode,omitempty" json:"mode,omitempty"`
+	LocalHost  string `toml:"local_host,omitempty" json:"local_host,omitempty"`
 	LocalPort  int    `toml:"local_port" json:"local_port"`
 	RemoteHost string `toml:"remote_host" json:"remote_host"`
 	RemotePort int    `toml:"remote_port" json:"remote_port"`
 	// New: Reference to SSH connection
 	SSHConnection string `toml:"ssh_connection,omitempty" json:"ssh_connection,omitempty"` // Reference to SSH connection name
 	// Old: Direct SSH config (for backward compatibility)
-	SSHHost              string `toml:"ssh_host,omitempty" json:"ssh_host,omitempty"`
-	SSHUser              string `toml:"ssh_user,omitempty" json:"ssh_user,omitempty"`
-	KeyFile              string `toml:"key_file,omitempty" json:"key_file,omitempty"`
-	AuthMethod           string `toml:"auth_method,omitempty" json:"auth_method,omitempty"`
-	AgentSocket          string `toml:"agent_socket,omitempty" json:"agent_socket,omitempty"`
-	HostKeyCheck         string `toml:"host_key_check,omitempty" json:"host_key_check,omitempty"`     // known_hosts（默认）或 insecure
-	KnownHostsFile       string `toml:"known_hosts_file,omitempty" json:"known_hosts_file,omitempty"` // 留空时用 ~/.ssh/known_hosts
-	ReconnectStrategy    string `toml:"reconnect_strategy" json:"reconnect_strategy"`                 // "fixed" or "exponential"
-	ReconnectInterval    string `toml:"reconnect_interval" json:"reconnect_interval"`                 // duration string, e.g., "5s"
-	MaxReconnectAttempts int    `toml:"max_reconnect_attempts" json:"max_reconnect_attempts"`         // 0 = infinite
+	SSHHost              string   `toml:"ssh_host,omitempty" json:"ssh_host,omitempty"`
+	SSHUser              string   `toml:"ssh_user,omitempty" json:"ssh_user,omitempty"`
+	KeyFile              string   `toml:"key_file,omitempty" json:"key_file,omitempty"`
+	AuthMethod           string   `toml:"auth_method,omitempty" json:"auth_method,omitempty"`
+	AgentSocket          string   `toml:"agent_socket,omitempty" json:"agent_socket,omitempty"`
+	ProxyJump            []string `toml:"proxy_jump,omitempty" json:"proxy_jump,omitempty"`
+	HostKeyCheck         string   `toml:"host_key_check,omitempty" json:"host_key_check,omitempty"`     // known_hosts（默认）或 insecure
+	KnownHostsFile       string   `toml:"known_hosts_file,omitempty" json:"known_hosts_file,omitempty"` // 留空时用 ~/.ssh/known_hosts
+	ReconnectStrategy    string   `toml:"reconnect_strategy" json:"reconnect_strategy"`                 // "fixed" or "exponential"
+	ReconnectInterval    string   `toml:"reconnect_interval" json:"reconnect_interval"`                 // duration string, e.g., "5s"
+	MaxReconnectAttempts int      `toml:"max_reconnect_attempts" json:"max_reconnect_attempts"`         // 0 = infinite
 }
 
 func (t Tunnel) AutoStartEnabled() bool { return t.AutoStart == nil || *t.AutoStart }
@@ -97,6 +101,9 @@ const (
 // ParsedTunnel represents a tunnel with parsed configuration values
 type ParsedTunnel struct {
 	Name                 string
+	Mode                 string
+	LocalHost            string
+	Jumps                []SSHHop
 	LocalPort            int
 	RemoteHost           string
 	RemotePort           int
@@ -193,8 +200,13 @@ func (c *Config) Validate() error {
 		sshConnMap[conn.Name] = conn
 	}
 
-	// Check for duplicate local ports
-	localPorts := make(map[int]bool)
+	for _, conn := range c.SSHConnections {
+		if _, err := jumpNames(sshConnMap, conn.ProxyJump, conn.Name); err != nil {
+			return err
+		}
+	}
+	// Only local/dynamic tunnels allocate local listeners.
+	localPorts := make(map[string]bool)
 	tunnelNames := make(map[string]bool)
 	// 注意用下标取指针：默认值必须写回 c.Tunnels，只改 range 的副本会被丢弃，
 	// 导致 ParseTunnels 拿到空字符串的 reconnect_interval。
@@ -207,19 +219,35 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("tunnel name %q is duplicated", tunnel.Name)
 		}
 		tunnelNames[tunnel.Name] = true
+		if tunnel.Mode == "" {
+			tunnel.Mode = "local"
+		}
+		if tunnel.Mode != "local" && tunnel.Mode != "remote" && tunnel.Mode != "dynamic" {
+			return fmt.Errorf("tunnel %s: mode must be local, remote or dynamic", tunnel.Name)
+		}
+		if tunnel.LocalHost == "" || (tunnel.Mode != "remote" && tunnel.LocalHost == "localhost") {
+			tunnel.LocalHost = "127.0.0.1"
+		}
+		if tunnel.Mode != "remote" {
+			ip := net.ParseIP(tunnel.LocalHost)
+			if ip == nil || !ip.IsLoopback() {
+				return fmt.Errorf("tunnel %s: local listener must use a loopback address", tunnel.Name)
+			}
+			tunnel.LocalHost = ip.String()
+		}
 		if tunnel.LocalPort == 0 {
 			return fmt.Errorf("tunnel %s: local_port is required", tunnel.Name)
 		}
 		if tunnel.LocalPort < 1 || tunnel.LocalPort > 65535 {
 			return fmt.Errorf("tunnel %s: local_port must be between 1 and 65535", tunnel.Name)
 		}
-		if tunnel.RemoteHost == "" {
+		if tunnel.Mode != "dynamic" && tunnel.RemoteHost == "" {
 			return fmt.Errorf("tunnel %s: remote_host is required", tunnel.Name)
 		}
-		if tunnel.RemotePort == 0 {
+		if tunnel.Mode != "dynamic" && tunnel.RemotePort == 0 {
 			return fmt.Errorf("tunnel %s: remote_port is required", tunnel.Name)
 		}
-		if tunnel.RemotePort < 1 || tunnel.RemotePort > 65535 {
+		if tunnel.Mode != "dynamic" && (tunnel.RemotePort < 1 || tunnel.RemotePort > 65535) {
 			return fmt.Errorf("tunnel %s: remote_port must be between 1 and 65535", tunnel.Name)
 		}
 
@@ -241,10 +269,18 @@ func (c *Config) Validate() error {
 		}
 
 		// Check for duplicate local ports
-		if localPorts[tunnel.LocalPort] {
-			return fmt.Errorf("tunnel %s: local_port %d is already in use", tunnel.Name, tunnel.LocalPort)
+		if tunnel.Mode != "remote" {
+			address := net.JoinHostPort(tunnel.LocalHost, strconv.Itoa(tunnel.LocalPort))
+			if localPorts[address] {
+				return fmt.Errorf("tunnel %s: local_port %d is already in use", tunnel.Name, tunnel.LocalPort)
+			}
+			localPorts[address] = true
 		}
-		localPorts[tunnel.LocalPort] = true
+		if tunnel.SSHConnection == "" {
+			if _, err := jumpNames(sshConnMap, tunnel.ProxyJump, ""); err != nil {
+				return err
+			}
+		}
 
 		// Validate reconnect strategy
 		if tunnel.ReconnectStrategy == "" {
@@ -297,6 +333,7 @@ func (c *Config) ParseTunnels() ([]ParsedTunnel, error) {
 		var sshHost, sshUser, keyFile string
 		var hostKeyCheck, knownHostsFile string
 		var authMethod, agentSocket string
+		var proxyJump []string
 		var err error
 
 		// Resolve SSH configuration
@@ -314,6 +351,7 @@ func (c *Config) ParseTunnels() ([]ParsedTunnel, error) {
 				keyFile = c.ResolveKeyPath(conn.KeyFile)
 			}
 			authMethod, agentSocket = conn.AuthMethod, conn.AgentSocket
+			proxyJump = conn.ProxyJump
 			hostKeyCheck = conn.HostKeyCheck
 			knownHostsFile = conn.KnownHostsFile
 		} else {
@@ -327,6 +365,7 @@ func (c *Config) ParseTunnels() ([]ParsedTunnel, error) {
 				keyFile = c.ResolveKeyPath(tunnel.KeyFile)
 			}
 			authMethod, agentSocket = tunnel.AuthMethod, tunnel.AgentSocket
+			proxyJump = tunnel.ProxyJump
 			hostKeyCheck = tunnel.HostKeyCheck
 			knownHostsFile = tunnel.KnownHostsFile
 		}
@@ -356,6 +395,25 @@ func (c *Config) ParseTunnels() ([]ParsedTunnel, error) {
 			return nil, fmt.Errorf("tunnel %s: invalid ssh host '%s': %w", tunnel.Name, sshHost, err)
 		}
 		sshHost = normalizedSSHHost
+		jumpList, err := jumpNames(sshConnMap, proxyJump, tunnel.SSHConnection)
+		if err != nil {
+			return nil, err
+		}
+		jumps := make([]SSHHop, 0, len(jumpList))
+		for _, name := range jumpList {
+			hop, err := c.parseHop(sshConnMap[name])
+			if err != nil {
+				return nil, err
+			}
+			jumps = append(jumps, hop)
+		}
+		mode, localHost := tunnel.Mode, tunnel.LocalHost
+		if mode == "" {
+			mode = "local"
+		}
+		if localHost == "" || (mode != "remote" && localHost == "localhost") {
+			localHost = "127.0.0.1"
+		}
 
 		// 密钥文件此时不必存在：缺失时会在隧道启动时给出明确错误
 		//（见 tunnel.createSSHConnection），避免一条失效配置（如密钥被
@@ -375,6 +433,9 @@ func (c *Config) ParseTunnels() ([]ParsedTunnel, error) {
 
 		parsed = append(parsed, ParsedTunnel{
 			Name:                 tunnel.Name,
+			Mode:                 mode,
+			LocalHost:            localHost,
+			Jumps:                jumps,
 			LocalPort:            tunnel.LocalPort,
 			RemoteHost:           tunnel.RemoteHost,
 			RemotePort:           tunnel.RemotePort,
@@ -641,5 +702,8 @@ func expandEnv(s string) string {
 		result = result[:startIdx] + varValue + result[endIdx:]
 	}
 
+	if result == "" {
+		return ""
+	}
 	return filepath.Clean(result)
 }

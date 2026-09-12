@@ -23,23 +23,26 @@ const logBufferSize = 500
 
 // TunnelInfo 是隧道配置与运行状态的合并视图，供 UI 直接渲染。
 type TunnelInfo struct {
-	Name                 string `json:"name"`
-	Group                string `json:"group,omitempty"`
-	AutoStart            *bool  `json:"auto_start,omitempty"`
-	LocalPort            int    `json:"local_port"`
-	RemoteHost           string `json:"remote_host"`
-	RemotePort           int    `json:"remote_port"`
-	SSHConnection        string `json:"ssh_connection"`
-	SSHHost              string `json:"ssh_host"`
-	SSHUser              string `json:"ssh_user"`
-	KeyFile              string `json:"key_file,omitempty"`
-	AuthMethod           string `json:"auth_method,omitempty"`
-	AgentSocket          string `json:"agent_socket,omitempty"`
-	HostKeyCheck         string `json:"host_key_check,omitempty"`
-	KnownHostsFile       string `json:"known_hosts_file,omitempty"`
-	ReconnectStrategy    string `json:"reconnect_strategy"`
-	ReconnectInterval    string `json:"reconnect_interval"`
-	MaxReconnectAttempts int    `json:"max_reconnect_attempts"`
+	Name                 string   `json:"name"`
+	Group                string   `json:"group,omitempty"`
+	AutoStart            *bool    `json:"auto_start,omitempty"`
+	Mode                 string   `json:"mode,omitempty"`
+	LocalHost            string   `json:"local_host,omitempty"`
+	ProxyJump            []string `json:"proxy_jump,omitempty"`
+	LocalPort            int      `json:"local_port"`
+	RemoteHost           string   `json:"remote_host"`
+	RemotePort           int      `json:"remote_port"`
+	SSHConnection        string   `json:"ssh_connection"`
+	SSHHost              string   `json:"ssh_host"`
+	SSHUser              string   `json:"ssh_user"`
+	KeyFile              string   `json:"key_file,omitempty"`
+	AuthMethod           string   `json:"auth_method,omitempty"`
+	AgentSocket          string   `json:"agent_socket,omitempty"`
+	HostKeyCheck         string   `json:"host_key_check,omitempty"`
+	KnownHostsFile       string   `json:"known_hosts_file,omitempty"`
+	ReconnectStrategy    string   `json:"reconnect_strategy"`
+	ReconnectInterval    string   `json:"reconnect_interval"`
+	MaxReconnectAttempts int      `json:"max_reconnect_attempts"`
 	tunnel.RuntimeStatus
 }
 
@@ -164,6 +167,9 @@ func (a *App) GetTunnels() []TunnelInfo {
 			Name:                 t.Name,
 			Group:                t.Group,
 			AutoStart:            t.AutoStart,
+			Mode:                 t.Mode,
+			LocalHost:            t.LocalHost,
+			ProxyJump:            t.ProxyJump,
 			LocalPort:            t.LocalPort,
 			RemoteHost:           t.RemoteHost,
 			RemotePort:           t.RemotePort,

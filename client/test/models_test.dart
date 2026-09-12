@@ -2,6 +2,23 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ssh_tunnel_client/models.dart';
 
 void main() {
+  test('转发类型、本机目标与跳板链在状态更新和复制时保留', () {
+    final tunnel = Tunnel.fromJson({
+      'name': 'reverse',
+      'mode': 'remote',
+      'local_host': 'localhost',
+      'local_port': 5432,
+      'remote_host': '127.0.0.1',
+      'remote_port': 15432,
+      'proxy_jump': ['jump-a', 'jump-b'],
+    });
+    expect(tunnel.copyWith(isRunning: true).toJson(), tunnel.toJson());
+    final copy = tunnel.duplicateAs('copy', remotePort: 15433);
+    expect(copy.localPort, 5432);
+    expect(copy.remotePort, 15433);
+    expect(copy.modeLabel, '反向转发');
+    expect(copy.proxyJump, ['jump-a', 'jump-b']);
+  });
   test('agent 认证与密钥解锁状态保留', () {
     final json = {
       'name': 'agent',

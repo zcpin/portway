@@ -222,13 +222,18 @@ func (t *Tunnel) connectAndForward(ctx context.Context) (bool, error) {
 	}
 
 	// Create and start forwarder
+	localHost := t.config.LocalHost
+	if localHost == "" {
+		localHost = "127.0.0.1"
+	}
 	forwarder := NewForwarder(
 		t.config.Name,
-		"127.0.0.1", // Always bind to localhost
+		localHost,
 		fmt.Sprintf("%d", t.config.LocalPort),
 		t.config.RemoteHost,
 		fmt.Sprintf("%d", t.config.RemotePort),
 		client,
+		t.config.Mode,
 	)
 
 	// 同时登记连接与转发器；已取消的旧拨号不能覆盖新一次 Start 的资源。
@@ -335,56 +340,7 @@ func (t *Tunnel) keepAlive(ctx context.Context, client sshConn) {
 // 不用 ssh.Dial 而是自己管理底层连接：这样 ctx 取消（用户点停止）能中断
 // 正在进行的拨号与握手，而不是让 Stop 一直等到 30 秒超时。
 func (t *Tunnel) createSSHConnection(ctx context.Context) (sshConn, error) {
-	timeout := t.connectTimeout
-	if timeout <= 0 {
-		timeout = sshConnectTimeout
-	}
-	connectCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	auth, cleanup, err := t.authentication(connectCtx)
-	if err != nil {
-		return nil, err
-	}
-	defer cleanup()
-
-	hostKeyCallback, err := t.hostKeyCallback()
-	if err != nil {
-		return nil, err
-	}
-
-	// Create SSH client config
-	sshConfig := &ssh.ClientConfig{
-		User:            t.config.SSHUser,
-		Auth:            []ssh.AuthMethod{auth},
-		HostKeyCallback: hostKeyCallback,
-		Timeout:         sshConnectTimeout,
-	}
-
-	// 同一个超时覆盖 TCP 拨号与 SSH 握手，取消时关闭底层连接解除阻塞。
-	dialer := &net.Dialer{}
-	netConn, err := dialer.DialContext(connectCtx, "tcp", t.config.SSHHost)
-	if err != nil {
-		return nil, fmt.Errorf("failed to dial %s: %w", t.config.SSHHost, err)
-	}
-
-	stopClose := context.AfterFunc(connectCtx, func() { netConn.Close() })
-	defer stopClose()
-
-	conn, chans, reqs, err := ssh.NewClientConn(netConn, t.config.SSHHost, sshConfig)
-	if err != nil {
-		netConn.Close()
-		if connectCtx.Err() != nil {
-			err = connectCtx.Err()
-		}
-		return nil, fmt.Errorf("failed to establish SSH connection to %s: %w", t.config.SSHHost, err)
-	}
-	// 握手完成后撤销超时关闭，避免正常会话在握手时限到达后被断开。
-	if !stopClose() {
-		conn.Close()
-		return nil, fmt.Errorf("SSH handshake cancelled: %w", connectCtx.Err())
-	}
-
-	return ssh.NewClient(conn, chans, reqs), nil
+	return t.connectChain(ctx)
 }
 
 // hostKeyCallback 按配置返回主机密钥校验策略。

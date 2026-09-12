@@ -89,6 +89,52 @@ Future<void> _openEditor<T>(
 }
 
 void main() {
+  testWidgets('SOCKS5 隧道无需固定远端目标并保留跳板链', (tester) async {
+    final original = Tunnel.fromJson({
+      'name': 'proxy',
+      'mode': 'dynamic',
+      'local_port': 1080,
+      'ssh_host': 'example:22',
+      'ssh_user': 'alice',
+      'auth_method': 'agent',
+      'proxy_jump': ['jump-a', 'jump-b'],
+    });
+    Tunnel? saved;
+    await _openEditor<Tunnel>(
+      tester,
+      TunnelEditorDialog(editing: original),
+      (value) => saved = value,
+    );
+    expect(find.widgetWithText(TextFormField, '远端端口 *'), findsNothing);
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+    expect(saved?.toJson(), original.toJson());
+  });
+
+  testWidgets('反向转发编辑器区分本机目标与远端监听', (tester) async {
+    final original = Tunnel.fromJson({
+      'name': 'reverse',
+      'mode': 'remote',
+      'local_host': 'localhost',
+      'local_port': 5432,
+      'remote_host': '127.0.0.1',
+      'remote_port': 15432,
+      'ssh_host': 'example:22',
+      'ssh_user': 'alice',
+      'auth_method': 'agent',
+    });
+    Tunnel? saved;
+    await _openEditor<Tunnel>(
+      tester,
+      TunnelEditorDialog(editing: original),
+      (value) => saved = value,
+    );
+    expect(find.widgetWithText(TextFormField, '本机目标端口 *'), findsOneWidget);
+    expect(find.widgetWithText(TextFormField, '远端监听端口 *'), findsOneWidget);
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+    expect(saved?.toJson(), original.toJson());
+  });
   testWidgets('agent 连接可不填写私钥并保留 agent 地址', (tester) async {
     SshConnection? saved;
     await _openEditor<SshConnection>(

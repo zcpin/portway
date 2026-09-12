@@ -13,7 +13,7 @@ func (m *Manager) InspectHostKey(ctx context.Context, conn config.SSHConnection)
 	if err != nil {
 		return tunnel.HostKeyInfo{}, err
 	}
-	return tunnel.InspectHostKey(ctx, parsed)
+	return tunnel.InspectHostKey(ctx, parsed, m.keys)
 }
 
 func (m *Manager) TrustHostKey(ctx context.Context, conn config.SSHConnection, fingerprint string, replace bool) (tunnel.HostKeyInfo, error) {
@@ -22,5 +22,5 @@ func (m *Manager) TrustHostKey(ctx context.Context, conn config.SSHConnection, f
 	if err != nil {
 		return tunnel.HostKeyInfo{}, err
 	}
-	return tunnel.TrustHostKey(ctx, parsed, fingerprint, replace)
+	return tunnel.TrustHostKey(ctx, parsed, fingerprint, replace, m.keys)
 }

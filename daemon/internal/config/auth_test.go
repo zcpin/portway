@@ -20,6 +20,18 @@ func TestAgentConfigurationDoesNotRequirePrivateKey(t *testing.T) {
 	if parsed[0].AuthMethod != "agent" || parsed[0].AgentSocket != "fixture-agent" || parsed[0].KeyFile != "" {
 		t.Fatalf("agent config: %+v", parsed[0])
 	}
+	connection.AgentSocket = ""
+	if err := cio.UpdateSSHConnection(connection.Name, connection); err != nil {
+		t.Fatal(err)
+	}
+	cfg = cio.GetConfig()
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	parsed, err = cfg.ParseTunnels()
+	if err != nil || parsed[0].AgentSocket != "" {
+		t.Fatalf("empty agent_socket must use the system default: %+v %v", parsed, err)
+	}
 	connection.AuthMethod = "unsupported"
 	if err := cio.UpdateSSHConnection(connection.Name, connection); err == nil {
 		t.Fatal("unsupported authentication method accepted")

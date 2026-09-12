@@ -5,6 +5,9 @@ import '../models.dart';
 import '../providers.dart';
 import '../widgets.dart';
 
+List<String> parseJumpNames(String value) => value.split(RegExp(r'\r?\n'))
+    .map((name) => name.trim()).where((name) => name.isNotEmpty).toList();
+
 Future<bool> unlockPrivateKey(
   BuildContext context,
   WidgetRef ref,

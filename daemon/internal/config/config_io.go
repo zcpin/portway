@@ -47,9 +47,13 @@ func cloneConfig(cfg *Config) *Config {
 	result := *cfg // 保留 configDir，以及尚未显式设置的重连字段。
 	result.SSHConnections = make([]SSHConnection, len(cfg.SSHConnections))
 	copy(result.SSHConnections, cfg.SSHConnections)
+	for i := range result.SSHConnections {
+		result.SSHConnections[i].ProxyJump = append([]string(nil), result.SSHConnections[i].ProxyJump...)
+	}
 	result.Tunnels = make([]Tunnel, len(cfg.Tunnels))
 	copy(result.Tunnels, cfg.Tunnels)
 	for i := range result.Tunnels {
+		result.Tunnels[i].ProxyJump = append([]string(nil), result.Tunnels[i].ProxyJump...)
 		if result.Tunnels[i].AutoStart != nil {
 			value := *result.Tunnels[i].AutoStart
 			result.Tunnels[i].AutoStart = &value
