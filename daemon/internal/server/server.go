@@ -107,6 +107,7 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("POST /api/tunnels/{name}/restart", s.auth(http.HandlerFunc(s.handleRestartTunnel)))
 
 	mux.Handle("GET /api/ssh-connections", s.auth(http.HandlerFunc(s.handleListSSH)))
+	mux.Handle("POST /api/ssh-connections/test", s.auth(http.HandlerFunc(s.handleTestSSH)))
 	mux.Handle("POST /api/ssh-connections", s.auth(http.HandlerFunc(s.handleCreateSSH)))
 	mux.Handle("PUT /api/ssh-connections/{name}", s.auth(http.HandlerFunc(s.handleUpdateSSH)))
 	mux.Handle("DELETE /api/ssh-connections/{name}", s.auth(http.HandlerFunc(s.handleDeleteSSH)))

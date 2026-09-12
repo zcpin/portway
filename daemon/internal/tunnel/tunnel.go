@@ -46,6 +46,7 @@ type Tunnel struct {
 	mu         sync.Mutex
 	isRunning  bool
 	manualStop bool
+	status     RuntimeStatus
 
 	// dial 建立 SSH 连接，默认走 createSSHConnection，测试可替换
 	dial func(ctx context.Context) (sshConn, error)
@@ -90,6 +91,7 @@ func (t *Tunnel) Start() error {
 	wg := t.wg
 	t.isRunning = true
 	t.manualStop = false
+	t.status = RuntimeStatus{State: StateConnecting}
 	t.mu.Unlock()
 
 	go t.run(ctx, wg)
@@ -107,6 +109,8 @@ func (t *Tunnel) Stop() {
 	}
 	t.manualStop = true
 	t.isRunning = false
+	t.status.State = StateStopped
+	t.status.ConnectedAt = ""
 	cancel := t.cancel
 	forwarder := t.forwarder
 	sshClient := t.sshClient
@@ -160,6 +164,7 @@ func (t *Tunnel) run(ctx context.Context, wg *sync.WaitGroup) {
 			return
 		}
 		if !t.strategy.ShouldContinue(attempt, t.config.MaxReconnectAttempts) {
+			t.setStatus(ctx, StateFailed, nil, false)
 			logger.Error("[%s] Max reconnect attempts (%d) reached, giving up", t.config.Name, t.config.MaxReconnectAttempts)
 			return
 		}
@@ -180,8 +185,12 @@ func (t *Tunnel) run(ctx context.Context, wg *sync.WaitGroup) {
 		}
 
 		logger.Warn("[%s] Connection lost (attempt %d): %v", t.config.Name, attempt+1, err)
-
 		attempt++
+		if !t.strategy.ShouldContinue(attempt, t.config.MaxReconnectAttempts) {
+			t.setStatus(ctx, StateFailed, err, false)
+			return
+		}
+		t.setStatus(ctx, StateReconnecting, err, true)
 		interval := t.strategy.GetInterval(attempt)
 		logger.Info("[%s] Reconnecting in %v...", t.config.Name, interval)
 
@@ -238,6 +247,7 @@ func (t *Tunnel) connectAndForward(ctx context.Context) (bool, error) {
 	if err := forwarder.Start(); err != nil {
 		return false, fmt.Errorf("failed to start forwarder: %w", err)
 	}
+	t.setStatus(ctx, StateConnected, nil, false)
 
 	established := true
 	runErr := error(nil)

@@ -88,6 +88,20 @@ func (s *Server) handleRestartTunnel(w http.ResponseWriter, r *http.Request) {
 
 // ---------- SSH 连接 ----------
 
+func (s *Server) handleTestSSH(w http.ResponseWriter, r *http.Request) {
+	var conn config.SSHConnection
+	if err := decodeJSON(w, r, &conn); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	result, err := s.app.TestSSHConnection(r.Context(), conn)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 func (s *Server) handleListSSH(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.app.GetSSHConnections())
 }

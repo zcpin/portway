@@ -3,7 +3,9 @@
 package app
 
 import (
+	"context"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -14,6 +16,7 @@ import (
 	"github.com/byteporter/ssh-tunnel/internal/config"
 	"github.com/byteporter/ssh-tunnel/internal/logger"
 	"github.com/byteporter/ssh-tunnel/internal/manager"
+	"github.com/byteporter/ssh-tunnel/internal/tunnel"
 )
 
 const logBufferSize = 500
@@ -33,7 +36,7 @@ type TunnelInfo struct {
 	ReconnectStrategy    string `json:"reconnect_strategy"`
 	ReconnectInterval    string `json:"reconnect_interval"`
 	MaxReconnectAttempts int    `json:"max_reconnect_attempts"`
-	IsRunning            bool   `json:"is_running"`
+	tunnel.RuntimeStatus
 }
 
 // LogEntry 是一条日志，同时用于历史回放与实时推送。
@@ -147,7 +150,7 @@ func (a *App) ConfigPath() string {
 // GetTunnels 返回所有隧道及其运行状态。
 func (a *App) GetTunnels() []TunnelInfo {
 	cfg := a.mgr.GetConfig()
-	status := a.mgr.GetStatus()
+	status := a.mgr.GetRuntimeStatus()
 
 	result := make([]TunnelInfo, 0, len(cfg.Tunnels))
 	for _, t := range cfg.Tunnels {
@@ -165,7 +168,7 @@ func (a *App) GetTunnels() []TunnelInfo {
 			ReconnectStrategy:    t.ReconnectStrategy,
 			ReconnectInterval:    t.ReconnectInterval,
 			MaxReconnectAttempts: t.MaxReconnectAttempts,
-			IsRunning:            status[t.Name],
+			RuntimeStatus:        status[t.Name],
 		})
 	}
 	return result
@@ -207,6 +210,22 @@ func (a *App) RestartTunnel(name string) error {
 
 func (a *App) GetSSHConnections() []config.SSHConnection {
 	return a.mgr.GetSSHConnections()
+}
+
+func (a *App) TestSSHConnection(ctx context.Context, conn config.SSHConnection) (tunnel.Diagnostic, error) {
+	cfg := a.mgr.GetConfig()
+	conn.Name = "connection-test"
+	cfg.SSHConnections = []config.SSHConnection{conn}
+	cfg.Tunnels = []config.Tunnel{{Name: "connection-test", SSHConnection: conn.Name,
+		LocalPort: 1, RemoteHost: "127.0.0.1", RemotePort: 1}}
+	if err := cfg.Validate(); err != nil {
+		return tunnel.Diagnostic{}, err
+	}
+	parsed, err := cfg.ParseTunnels()
+	if err != nil {
+		return tunnel.Diagnostic{}, err
+	}
+	return tunnel.TestConnection(ctx, parsed[0]), nil
 }
 
 // GetGlobalSettings 返回全局配置项（日志级别、重连默认值）。
@@ -422,7 +441,7 @@ func (a *App) broadcastStatus() {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
-	var last map[string]bool
+	var last map[string]tunnel.RuntimeStatus
 
 	for {
 		select {
@@ -430,11 +449,11 @@ func (a *App) broadcastStatus() {
 			return
 		case <-ticker.C:
 			a.statusMu.Lock()
-			status := a.mgr.GetStatus()
-			if !statusEqual(status, last) {
-				last = cloneStatus(status)
+			status := a.mgr.GetRuntimeStatus()
+			if !maps.Equal(status, last) {
+				last = status
 				if e := a.getEmitter(); e != nil {
-					e.Emit("status", status)
+					emitRuntime(e, status)
 				}
 			}
 			a.statusMu.Unlock()
@@ -446,7 +465,7 @@ func (a *App) emitStatus() {
 	a.statusMu.Lock()
 	defer a.statusMu.Unlock()
 	if e := a.getEmitter(); e != nil {
-		e.Emit("status", a.mgr.GetStatus())
+		emitRuntime(e, a.mgr.GetRuntimeStatus())
 	}
 }
 
@@ -459,12 +478,21 @@ func (a *App) SendSnapshot(target EventEmitter) {
 	a.statusMu.Lock()
 	defer a.statusMu.Unlock()
 	tunnels := a.GetTunnels()
-	status := make(map[string]bool, len(tunnels))
-	for _, tunnel := range tunnels {
-		status[tunnel.Name] = tunnel.IsRunning
+	status := make(map[string]tunnel.RuntimeStatus, len(tunnels))
+	for _, entry := range tunnels {
+		status[entry.Name] = entry.RuntimeStatus
 	}
 	target.Emit("snapshot", tunnels)
+	emitRuntime(target, status)
+}
+
+func emitRuntime(target EventEmitter, runtime map[string]tunnel.RuntimeStatus) {
+	status := make(map[string]bool, len(runtime))
+	for name, entry := range runtime {
+		status[name] = entry.IsRunning
+	}
 	target.Emit("status", status)
+	target.Emit("runtime", runtime)
 }
 
 func (a *App) emitSnapshot() {

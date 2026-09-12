@@ -2,6 +2,29 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ssh_tunnel_client/models.dart';
 
 void main() {
+  test('运行状态独立于配置，更新后保留认证和错误字段', () {
+    final tunnel = Tunnel.fromJson({
+      'name': 'db',
+      'key_file': 'key',
+      'is_running': true,
+      'state': 'reconnecting',
+      'last_error': 'unreachable',
+      'retry_count': 2,
+    });
+    expect(tunnel.stateLabel, '重连中');
+    expect(tunnel.copyWith(isRunning: true).lastError, 'unreachable');
+    final connected = tunnel.withRuntime({
+      'state': 'connected',
+      'last_error': '',
+      'connected_at': '2026-09-12T00:00:00Z',
+      'retry_count': 2,
+      'is_running': true,
+    });
+    expect(connected.stateLabel, '已连接');
+    expect(connected.keyFile, 'key');
+    expect(connected.lastError, isEmpty);
+    expect(connected.toJson().containsKey('state'), isFalse);
+  });
   test('SSH 连接往返保留主机校验配置', () {
     final original = <String, dynamic>{
       'name': 'test',

@@ -132,6 +132,9 @@ void main() {
         Tunnel.fromJson({'name': 'current', 'is_running': false}),
       ]);
       notifier.applyStatus({'current': true});
+      notifier.applyRuntime({
+        'current': {'state': 'connected', 'last_error': '', 'retry_count': 1},
+      });
       if (failRequest) {
         client.response.completeError(StateError('old request failed'));
       } else {
@@ -145,6 +148,8 @@ void main() {
       final rows = container.read(tunnelsProvider).valueOrNull!;
       expect(rows.map((row) => row.name), ['current']);
       expect(rows.single.isRunning, isTrue);
+      expect(rows.single.stateLabel, '已连接');
+      expect(rows.single.retryCount, 1);
     });
   }
 }

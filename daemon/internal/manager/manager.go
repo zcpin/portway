@@ -123,6 +123,16 @@ func (m *Manager) GetStatus() map[string]bool {
 	return status
 }
 
+func (m *Manager) GetRuntimeStatus() map[string]tunnel.RuntimeStatus {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	status := make(map[string]tunnel.RuntimeStatus, len(m.tunnels))
+	for name, tun := range m.tunnels {
+		status[name] = tun.Status()
+	}
+	return status
+}
+
 // StartTunnel starts a specific tunnel
 func (m *Manager) StartTunnel(name string) error {
 	m.mu.RLock()

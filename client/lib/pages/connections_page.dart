@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -163,6 +164,8 @@ class _ConnectionEditorState extends ConsumerState<ConnectionEditorDialog> {
 
   _KeyState _keyState = _KeyState.unknown;
   String _keyMessage = '';
+  bool _testing = false;
+  CancelToken? _testCancel;
 
   @override
   void initState() {
@@ -181,6 +184,7 @@ class _ConnectionEditorState extends ConsumerState<ConnectionEditorDialog> {
 
   @override
   void dispose() {
+    _testCancel?.cancel();
     for (final c in [_name, _host, _user, _keyFile]) {
       c.dispose();
     }
@@ -312,6 +316,11 @@ class _ConnectionEditorState extends ConsumerState<ConnectionEditorDialog> {
         ),
       ),
       actions: [
+        OutlinedButton.icon(
+          onPressed: _testing ? null : _testConnection,
+          icon: const Icon(Icons.network_check),
+          label: Text(_testing ? '测试中…' : '测试连接'),
+        ),
         TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('取消')),
@@ -365,16 +374,45 @@ class _ConnectionEditorState extends ConsumerState<ConnectionEditorDialog> {
 
   void _submit() {
     if (!_formKey.currentState!.validate()) return;
-    Navigator.pop(
-      context,
-      SshConnection(
+    Navigator.pop(context, _connection());
+  }
+
+  SshConnection _connection() => SshConnection(
         name: _name.text.trim(),
         host: _host.text.trim(),
         user: _user.text.trim(),
         keyFile: _keyFile.text.trim(),
         hostKeyCheck: widget.editing?.hostKeyCheck ?? '',
         knownHostsFile: widget.editing?.knownHostsFile ?? '',
-      ),
-    );
+      );
+
+  Future<void> _testConnection() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() => _testing = true);
+    final cancel = _testCancel = CancelToken();
+    try {
+      final client = await ref.read(clientProvider.future);
+      if (!mounted || cancel.isCancelled) return;
+      if (client == null) throw StateError('未连接到 daemon');
+      final result = await client.testSshConnection(
+          _connection(), cancelToken: cancel);
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(result.ok ? 'SSH 连接成功' : 'SSH 连接失败'),
+          content: SelectableText('耗时 ${result.elapsedMs} ms\n'
+              '${result.ok ? 'SSH 握手与认证已完成。' : result.error}'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context),
+                child: const Text('关闭')),
+          ],
+        ),
+      );
+    } catch (error) {
+      if (mounted && !cancel.isCancelled) showErrorSnack(context, error);
+    } finally {
+      if (mounted) setState(() => _testing = false);
+    }
   }
 }

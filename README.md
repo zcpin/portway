@@ -132,6 +132,8 @@ WebSocket 连接恢复后，客户端会自动同步完整隧道列表与运行�
 
 隧道可引用已有 SSH 连接，也可手动填写 SSH 主机、用户和私钥路径。编辑已有配置时会保留 `host_key_check`、`known_hosts_file` 和私钥路径；重连策略可选择「跟随全局设置」，重连间隔留空也会保留全局继承。
 
+隧道卡片显示连接中、已连接、重连中、失败或停止，以及最近错误、重试次数和连接时间。SSH 连接编辑器的「测试连接」会测试当前填写的配置并显示结果，不需要先保存，也不会启动端口转发。
+
 ## 典型场景：本地连远端 MySQL
 
 私钥**不上传、不复制**，配置里只记录本地文件路径（支持绝对路径、`~` 开头、相对路径）：
@@ -223,6 +225,7 @@ ssh-tunnel-daemon service <动作>       系统服务托管
 | POST | `/api/tunnels/{name}/stop` | 停止 |
 | POST | `/api/tunnels/{name}/restart` | 重启 |
 | GET/POST/PUT/DELETE | `/api/ssh-connections[/{name}]` | SSH 连接增删改查 |
+| POST | `/api/ssh-connections/test` | 测试待保存 SSH 配置，返回 `ok`、`elapsed_ms` 和错误 |
 | GET | `/api/keys` | 配置中引用的私钥列表（含是否存在） |
 | GET | `/api/keys/stat?path=<路径>` | 校验私钥路径对 daemon 是否可读 |
 | GET | `/api/logs` | 日志缓冲 |
@@ -243,6 +246,8 @@ WebSocket 事件格式：
 
 每次连接或重连 `/ws` 时，daemon 会主动发送 `snapshot` 事件，其 `snapshot` 字段与 `/api/tunnels` 的完整列表格式相同（没有隧道时为 `[]`），随后发送兼容旧客户端的 `status` 事件。配置增删改及重新加载也会推送快照；周期状态广播仍只在状态变化时发送。
 
+`runtime` 事件以隧道名为键，包含 `is_running`、`state`、`last_error`、`retry_count`、`connected_at`；这些字段也包含在列表快照中。`is_running` 表示运行任务仍存活，`state=connected` 表示 SSH 连接和转发监听均已建立。详细状态变化最多在下一次 2 秒轮询时推送。
+
 调试事件推送可用：
 
 ```bash
@@ -262,6 +267,8 @@ daemon **只监听回环地址**，并且：
 - TCP 拨号与 SSH 握手共用 30 秒超时；隧道建立后每 30 秒发送一次 SSH keepalive，单次响应最多等待 30 秒，超时后关闭连接并按 `reconnect_strategy` 自动重连
 
 ## 开发
+
+扩展计划及逐项实施进度见 [扩展实施记录](docs/extension-roadmap.md)。
 
 ```bash
 # daemon：构建、静态检查、测试（CI 中带 -race 运行）

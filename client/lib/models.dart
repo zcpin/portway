@@ -16,6 +16,10 @@ class Tunnel {
   final String reconnectInterval;
   final int maxReconnectAttempts;
   final bool isRunning;
+  final String state;
+  final String lastError;
+  final int retryCount;
+  final String connectedAt;
 
   const Tunnel({
     required this.name,
@@ -32,6 +36,10 @@ class Tunnel {
     required this.reconnectInterval,
     required this.maxReconnectAttempts,
     required this.isRunning,
+    this.state = '',
+    this.lastError = '',
+    this.retryCount = 0,
+    this.connectedAt = '',
   });
 
   factory Tunnel.fromJson(Map<String, dynamic> j) => Tunnel(
@@ -49,6 +57,10 @@ class Tunnel {
         reconnectInterval: j['reconnect_interval'] as String? ?? '',
         maxReconnectAttempts: _asInt(j['max_reconnect_attempts']),
         isRunning: j['is_running'] as bool? ?? false,
+        state: j['state'] as String? ?? '',
+        lastError: j['last_error'] as String? ?? '',
+        retryCount: _asInt(j['retry_count']),
+        connectedAt: j['connected_at'] as String? ?? '',
       );
 
   Map<String, dynamic> toJson() => {
@@ -67,7 +79,22 @@ class Tunnel {
         'max_reconnect_attempts': maxReconnectAttempts,
       };
 
-  Tunnel copyWith({bool? isRunning}) => Tunnel(
+  String get stateLabel => switch (state) {
+        'connecting' => '连接中',
+        'connected' => '已连接',
+        'reconnecting' => '重连中',
+        'failed' => '连接失败',
+        'stopped' => '已停止',
+        _ => isRunning ? '运行中' : '已停止',
+      };
+
+  Tunnel copyWith({
+    bool? isRunning,
+    String? state,
+    String? lastError,
+    int? retryCount,
+    String? connectedAt,
+  }) => Tunnel(
         name: name,
         localPort: localPort,
         remoteHost: remoteHost,
@@ -82,6 +109,37 @@ class Tunnel {
         reconnectInterval: reconnectInterval,
         maxReconnectAttempts: maxReconnectAttempts,
         isRunning: isRunning ?? this.isRunning,
+        state: state ?? this.state,
+        lastError: lastError ?? this.lastError,
+        retryCount: retryCount ?? this.retryCount,
+        connectedAt: connectedAt ?? this.connectedAt,
+      );
+
+  Tunnel withRuntime(Map<String, dynamic> runtime) => copyWith(
+        isRunning: runtime['is_running'] as bool?,
+        state: runtime['state'] as String?,
+        lastError: runtime['last_error'] as String?,
+        retryCount: runtime['retry_count'] as int?,
+        connectedAt: runtime['connected_at'] as String?,
+      );
+}
+
+class ConnectionDiagnostic {
+  final bool ok;
+  final int elapsedMs;
+  final String error;
+
+  const ConnectionDiagnostic({
+    required this.ok,
+    required this.elapsedMs,
+    this.error = '',
+  });
+
+  factory ConnectionDiagnostic.fromJson(Map<String, dynamic> json) =>
+      ConnectionDiagnostic(
+        ok: json['ok'] == true,
+        elapsedMs: _asInt(json['elapsed_ms']),
+        error: json['error'] as String? ?? '',
       );
 }
 

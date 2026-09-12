@@ -66,6 +66,14 @@ class DaemonClient {
     return (resp.data as List).map((e) => SshConnection.fromJson(e)).toList();
   }
 
+  Future<ConnectionDiagnostic> testSshConnection(
+    SshConnection connection, {CancelToken? cancelToken}
+  ) async {
+    final response = await _dio.post('/api/ssh-connections/test',
+        data: connection.toJson(), cancelToken: cancelToken);
+    return ConnectionDiagnostic.fromJson(response.data);
+  }
+
   Future<List<KeyInfo>> getKeys() async {
     final resp = await _dio.get('/api/keys');
     return (resp.data as List).map((e) => KeyInfo.fromJson(e)).toList();

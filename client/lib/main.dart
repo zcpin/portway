@@ -236,6 +236,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WindowListener {
                   .read(tunnelsProvider.notifier)
                   .applyStatus(status.cast<String, dynamic>());
             }
+          case 'runtime':
+            final runtime = event['runtime'];
+            if (runtime is Map) {
+              ref.read(tunnelsProvider.notifier).applyRuntime(runtime.cast<String, dynamic>());
+            }
           case 'log':
             final log = event['log'];
             if (log is Map) {

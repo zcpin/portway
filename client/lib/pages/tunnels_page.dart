@@ -95,9 +95,12 @@ class TunnelCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final running = tunnel.isRunning;
-    final statusColor = running
-        ? const Color(0xFF2E9E5B)
-        : theme.colorScheme.onSurface.withValues(alpha: 0.45);
+    final statusColor = switch (tunnel.state) {
+      'failed' => theme.colorScheme.error,
+      'connecting' || 'reconnecting' => const Color(0xFFB57700),
+      'connected' => const Color(0xFF2E9E5B),
+      _ => theme.colorScheme.onSurface.withValues(alpha: 0.45),
+    };
 
     return Card(
       child: Padding(
@@ -119,7 +122,7 @@ class TunnelCard extends ConsumerWidget {
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Text(
-                    running ? '运行中' : '已停止',
+                    tunnel.stateLabel,
                     style: theme.textTheme.labelSmall?.copyWith(
                       color: running
                           ? statusColor
@@ -189,8 +192,16 @@ class TunnelCard extends ConsumerWidget {
                   value:
                       '${tunnel.reconnectStrategy.isEmpty ? '全局策略' : tunnel.reconnectStrategy == 'exponential' ? '指数退避' : '固定间隔'} / ${tunnel.reconnectInterval.isEmpty ? '全局间隔' : tunnel.reconnectInterval}',
                 ),
+                InfoField(label: '重试次数', value: '${tunnel.retryCount}'),
+                if (tunnel.connectedAt.isNotEmpty)
+                  InfoField(label: '连接时间', value: DateTime.tryParse(tunnel.connectedAt)?.toLocal().toString() ?? tunnel.connectedAt),
               ],
             ),
+            if (tunnel.lastError.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              SelectableText('最近错误：${tunnel.lastError}',
+                style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error)),
+            ],
           ],
         ),
       ),

@@ -191,7 +191,7 @@ class TunnelsNotifier extends AsyncNotifier<List<Tunnel>> {
       state = const AsyncData([]);
       return;
     }
-    state = const AsyncLoading();
+    if (state.valueOrNull == null) state = const AsyncLoading();
     state = await AsyncValue.guard(() => _loadTunnels(client));
   }
 
@@ -202,6 +202,17 @@ class TunnelsNotifier extends AsyncNotifier<List<Tunnel>> {
     applySnapshot([
       for (final t in current)
         t.copyWith(isRunning: status[t.name] as bool? ?? t.isRunning),
+    ]);
+  }
+
+  void applyRuntime(Map<String, dynamic> runtime) {
+    final current = state.valueOrNull;
+    if (current == null) return;
+    applySnapshot([
+      for (final tunnel in current)
+        if (runtime[tunnel.name] is Map)
+          tunnel.withRuntime((runtime[tunnel.name] as Map).cast<String, dynamic>())
+        else tunnel,
     ]);
   }
 

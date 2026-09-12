@@ -1,10 +1,36 @@
 import 'package:flutter/material.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ssh_tunnel_client/models.dart';
 import 'package:ssh_tunnel_client/pages/connections_page.dart';
 import 'package:ssh_tunnel_client/pages/tunnels_page.dart';
 import 'package:ssh_tunnel_client/providers.dart';
+import 'package:ssh_tunnel_client/services/daemon_client.dart';
+
+class _DiagnosticClient extends DaemonClient {
+  _DiagnosticClient()
+    : super(
+        const DaemonInfo(
+          host: '127.0.0.1',
+          port: 1,
+          token: '',
+          pid: 0,
+          version: 'test',
+          configPath: '',
+        ),
+      );
+  SshConnection? tested;
+
+  @override
+  Future<ConnectionDiagnostic> testSshConnection(
+    SshConnection connection, {
+    CancelToken? cancelToken,
+  }) async {
+    tested = connection;
+    return const ConnectionDiagnostic(ok: true, elapsedMs: 12);
+  }
+}
 
 class _ReadableKeys extends KeysNotifier {
   @override
@@ -23,8 +49,9 @@ class _EmptyConnections extends SshConnectionsNotifier {
 Future<void> _openEditor<T>(
   WidgetTester tester,
   Widget editor,
-  ValueChanged<T?> onSaved,
-) async {
+  ValueChanged<T?> onSaved, {
+  DaemonClient? client,
+}) async {
   tester.view.physicalSize = const Size(1200, 1000);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.resetPhysicalSize);
@@ -34,6 +61,7 @@ Future<void> _openEditor<T>(
       overrides: [
         keysProvider.overrideWith(_ReadableKeys.new),
         sshConnectionsProvider.overrideWith(_EmptyConnections.new),
+        if (client != null) clientProvider.overrideWith((ref) async => client),
       ],
       child: MaterialApp(
         home: Builder(
@@ -61,6 +89,36 @@ Future<void> _openEditor<T>(
 }
 
 void main() {
+  testWidgets('测试连接使用未保存的编辑值并展示结果', (tester) async {
+    final client = _DiagnosticClient();
+    addTearDown(client.close);
+    SshConnection? saved;
+    await _openEditor<SshConnection>(
+      tester,
+      const ConnectionEditorDialog(
+        editing: SshConnection(
+          name: 'test',
+          host: 'old.example',
+          user: 'alice',
+          keyFile: 'key',
+          hostKeyCheck: 'known_hosts',
+          knownHostsFile: 'custom_hosts',
+        ),
+      ),
+      (value) => saved = value,
+      client: client,
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, '主机 *（host 或 host:port）'),
+      'new.example',
+    );
+    await tester.tap(find.text('测试连接'));
+    await tester.pumpAndSettle();
+    expect(find.text('SSH 连接成功'), findsOneWidget);
+    expect(client.tested?.host, 'new.example');
+    expect(client.tested?.knownHostsFile, 'custom_hosts');
+    expect(saved, isNull);
+  });
   testWidgets('修改 SSH 主机后保存仍保留主机密钥校验配置', (tester) async {
     const original = SshConnection(
       name: 'bastion',
