@@ -35,7 +35,7 @@ func (a *App) BatchTunnels(action string, names []string) ([]BatchResult, error)
 			err = fmt.Errorf("tunnel %s not found", name)
 		case action == "start" && !running:
 			err = a.StartTunnel(name)
-		case action == "stop" && running:
+		case action == "stop":
 			err = a.StopTunnel(name)
 		}
 		result := BatchResult{Name: name, OK: err == nil}

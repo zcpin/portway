@@ -23,6 +23,7 @@ class Tunnel {
   final String reconnectInterval;
   final int maxReconnectAttempts;
   final bool isRunning;
+  final bool desiredRunning;
   final String state;
   final String lastError;
   final int retryCount;
@@ -50,11 +51,12 @@ class Tunnel {
     required this.reconnectInterval,
     required this.maxReconnectAttempts,
     required this.isRunning,
+    bool? desiredRunning,
     this.state = '',
     this.lastError = '',
     this.retryCount = 0,
     this.connectedAt = '',
-  });
+  }) : desiredRunning = desiredRunning ?? isRunning;
 
   factory Tunnel.fromJson(Map<String, dynamic> j) => Tunnel(
         name: j['name'] as String? ?? '',
@@ -78,6 +80,7 @@ class Tunnel {
         reconnectInterval: j['reconnect_interval'] as String? ?? '',
         maxReconnectAttempts: _asInt(j['max_reconnect_attempts']),
         isRunning: j['is_running'] as bool? ?? false,
+        desiredRunning: j['desired_running'] as bool?,
         state: j['state'] as String? ?? '',
         lastError: j['last_error'] as String? ?? '',
         retryCount: _asInt(j['retry_count']),
@@ -125,6 +128,7 @@ class Tunnel {
 
   Tunnel copyWith({
     bool? isRunning,
+    bool? desiredRunning,
     String? state,
     String? lastError,
     int? retryCount,
@@ -151,6 +155,7 @@ class Tunnel {
         reconnectInterval: reconnectInterval,
         maxReconnectAttempts: maxReconnectAttempts,
         isRunning: isRunning ?? this.isRunning,
+        desiredRunning: desiredRunning ?? this.desiredRunning,
         state: state ?? this.state,
         lastError: lastError ?? this.lastError,
         retryCount: retryCount ?? this.retryCount,
@@ -159,6 +164,7 @@ class Tunnel {
 
   Tunnel withRuntime(Map<String, dynamic> runtime) => copyWith(
         isRunning: runtime['is_running'] as bool?,
+        desiredRunning: runtime['desired_running'] as bool?,
         state: runtime['state'] as String?,
         lastError: runtime['last_error'] as String?,
         retryCount: runtime['retry_count'] as int?,

@@ -67,7 +67,7 @@ class TunnelTrayMenu {
                 command(
                   '停止本组全部',
                   TrayTunnelAction('stop', groups[group]!.map((t) => t.name)),
-                  disabled: groups[group]!.every((t) => !t.isRunning),
+                  disabled: groups[group]!.every((t) => !t.isRunning && !t.desiredRunning),
                 ),
                 MenuItem.separator(),
                 for (final tunnel in groups[group]!)
@@ -82,6 +82,8 @@ class TunnelTrayMenu {
                             [tunnel.name],
                           ),
                         ),
+                        if (!tunnel.isRunning && tunnel.desiredRunning)
+                          command('停止自动恢复', TrayTunnelAction('stop', [tunnel.name])),
                         command(
                           tunnel.mode == 'remote' ? '复制远端监听地址' : '复制本地连接地址',
                           TrayTunnelAction('copy', [

@@ -232,6 +232,8 @@ class TunnelCard extends ConsumerWidget {
                   onSelected: (v) async {
                     if (v == 'diagnose') {
                       await openTunnelDiagnostics(context, ref, tunnel.name);
+                    } else if (v == 'cancel_recovery') {
+                      await _guard(context, () => ref.read(tunnelsProvider.notifier).stop(tunnel.name));
                     } else if (v == 'edit') {
                       await openTunnelEditor(context, ref, editing: tunnel);
                     } else if (v == 'copy') {
@@ -256,11 +258,13 @@ class TunnelCard extends ConsumerWidget {
                       }
                     }
                   },
-                  itemBuilder: (_) => const [
-                    PopupMenuItem(value: 'diagnose', child: Text('诊断连接')),
-                    PopupMenuItem(value: 'edit', child: Text('编辑')),
-                    PopupMenuItem(value: 'copy', child: Text('复制配置')),
-                    PopupMenuItem(value: 'delete', child: Text('删除')),
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(value: 'diagnose', child: Text('诊断连接')),
+                    if (!running && tunnel.desiredRunning)
+                      const PopupMenuItem(value: 'cancel_recovery', child: Text('停止自动恢复')),
+                    const PopupMenuItem(value: 'edit', child: Text('编辑')),
+                    const PopupMenuItem(value: 'copy', child: Text('复制配置')),
+                    const PopupMenuItem(value: 'delete', child: Text('删除')),
                   ],
                 ),
               ],
@@ -298,6 +302,10 @@ class TunnelCard extends ConsumerWidget {
               const SizedBox(height: 12),
               SelectableText('最近错误：${tunnel.lastError}',
                 style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error)),
+            ],
+            if (!running && tunnel.desiredRunning) ...[
+              const SizedBox(height: 8),
+              const Text('网络变化后会再次尝试连接，也可手动启动或在菜单中停止自动恢复。'),
             ],
           ],
         ),

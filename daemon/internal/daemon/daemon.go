@@ -153,6 +153,11 @@ func (d *Daemon) Run() error {
 	if err := d.app.Start(); err != nil {
 		logger.Error("启动隧道失败: %v", err)
 	}
+	monitorCtx, cancelMonitor := context.WithCancel(context.Background())
+	monitorDone := make(chan struct{})
+	go func() { defer close(monitorDone); d.app.WatchNetwork(monitorCtx) }()
+	stopMonitor := func() { cancelMonitor(); <-monitorDone }
+	defer stopMonitor()
 
 	// 系统服务模式由服务管理器发送停止指令，不接管终端信号
 	if !d.opts.ServiceMode {
@@ -170,12 +175,14 @@ func (d *Daemon) Run() error {
 
 	select {
 	case err := <-errCh:
+		stopMonitor()
 		if err != nil {
 			logger.Error("API 服务异常退出: %v", err)
 		}
 		d.app.Stop()
 		return err
 	case <-d.quit:
+		stopMonitor()
 		logger.Info("正在停止守护进程...")
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()

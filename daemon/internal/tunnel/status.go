@@ -17,11 +17,12 @@ const (
 
 // RuntimeStatus distinguishes a running retry loop from a usable connection.
 type RuntimeStatus struct {
-	IsRunning   bool   `json:"is_running"`
-	State       string `json:"state"`
-	LastError   string `json:"last_error"`
-	RetryCount  int    `json:"retry_count"`
-	ConnectedAt string `json:"connected_at"`
+	DesiredRunning bool   `json:"desired_running"`
+	IsRunning      bool   `json:"is_running"`
+	State          string `json:"state"`
+	LastError      string `json:"last_error"`
+	RetryCount     int    `json:"retry_count"`
+	ConnectedAt    string `json:"connected_at"`
 }
 
 func (t *Tunnel) Status() RuntimeStatus {
@@ -29,6 +30,7 @@ func (t *Tunnel) Status() RuntimeStatus {
 	defer t.mu.Unlock()
 	status := t.status
 	status.IsRunning = t.isRunning
+	status.DesiredRunning = t.ctx != nil && !t.manualStop
 	if status.State == "" {
 		status.State = StateStopped
 	}

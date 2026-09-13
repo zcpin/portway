@@ -221,6 +221,14 @@ proxy_jump = ["prod-server"]
 
 托盘菜单显示当前实例、运行中的隧道数量，以及按分组排列的隧道。可直接启停单条隧道或整个分组，复制本地连接地址（反向转发复制远端监听地址）。批量操作中有失败项时会显示主窗口并提示具体隧道；切换工作区或重新连接后，旧菜单操作会失效。
 
+### 休眠与换网恢复
+
+daemon 在 Windows 上监听系统唤醒、地址和路由变化，并在各平台每 2 秒检查网卡地址与时钟间断。检测到变化后，先快速探测已有 SSH 连接，健康连接继续使用；失效连接、正在拨号或退避等待的隧道会重新连接。这项能力在客户端退出后仍然有效。
+
+重试耗尽会保留此前的启动意图，下一次唤醒或换网时再尝试。手动停止会取消该意图；未启动的隧道不会自动启动。处于等待恢复状态时，可以在隧道卡片或托盘菜单选择「停止自动恢复」。这些运行意图只在当前 daemon 会话内有效，daemon 重启仍按配置中的 `auto_start` 启动。
+
+客户端运行时，连续失败 3 次或重试耗尽会显示一次桌面通知，之后成功连接再通知一次；同一次故障的重复推送不重复通知。通知需操作系统允许，Windows 首次通知时会注册应用的开始菜单快捷方式，点击通知可以显示主窗口。
+
 ## 客户端设置与关于
 
 左侧导航除隧道管理外，还有「设置」与「关于」两个页面：
@@ -301,7 +309,7 @@ WebSocket 事件格式：
 
 每次连接或重连 `/ws` 时，daemon 会主动发送 `snapshot` 事件，其 `snapshot` 字段与 `/api/tunnels` 的完整列表格式相同（没有隧道时为 `[]`），随后发送兼容旧客户端的 `status` 事件。配置增删改及重新加载也会推送快照；周期状态广播仍只在状态变化时发送。
 
-`runtime` 事件以隧道名为键，包含 `is_running`、`state`、`last_error`、`retry_count`、`connected_at`；这些字段也包含在列表快照中。`is_running` 表示运行任务仍存活，`state=connected` 表示 SSH 连接和转发监听均已建立。详细状态变化最多在下一次 2 秒轮询时推送。
+`runtime` 事件以隧道名为键，包含 `is_running`、`desired_running`、`state`、`last_error`、`retry_count`、`connected_at`；这些字段也包含在列表快照中。`is_running` 表示运行任务仍存活，`desired_running` 表示用户仍希望保持连接（包括重试耗尽后等待网络变化恢复），`state=connected` 表示 SSH 连接和转发监听均已建立。详细状态变化最多在下一次 2 秒轮询时推送。
 
 调试事件推送可用：
 
@@ -402,7 +410,7 @@ git push origin v1.2.3
 > macOS 为 ad-hoc 签名、未公证，分发给其它 Mac 首次需右键「打开」绕过 Gatekeeper；
 > 正式分发建议补上 Developer ID 签名与 notarization。
 
-Linux 便携版需要系统提供 GTK 3 与 Ayatana AppIndicator（或 AppIndicator）运行库；发布工作流会显式安装对应的开发依赖。
+Linux 便携版需要系统提供 GTK 3、Ayatana AppIndicator（或 AppIndicator）及 libnotify 运行库；发布工作流会显式安装对应的开发依赖。
 
 ### 检查更新与便携升级
 

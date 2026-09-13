@@ -87,16 +87,7 @@ func (t *Tunnel) Start() error {
 		t.mu.Unlock()
 		return fmt.Errorf("tunnel %s is already running", t.config.Name)
 	}
-	// ctx/cancel/wg 都必须在锁内完成：Stop 会在锁内捕获它们
-	ctx, cancel := context.WithCancel(context.Background())
-	t.ctx, t.cancel = ctx, cancel
-	t.sshClient, t.forwarder = nil, nil
-	t.wg = &sync.WaitGroup{}
-	t.wg.Add(1)
-	wg := t.wg
-	t.isRunning = true
-	t.manualStop = false
-	t.status = RuntimeStatus{State: StateConnecting}
+	ctx, wg := t.startLocked(StateConnecting)
 	t.mu.Unlock()
 
 	go t.run(ctx, wg)
@@ -108,23 +99,22 @@ func (t *Tunnel) Start() error {
 // Stop stops the tunnel
 func (t *Tunnel) Stop() {
 	t.mu.Lock()
+	t.manualStop = true
+	t.status.State = StateStopped
+	t.status.ConnectedAt = ""
 	if !t.isRunning {
 		t.mu.Unlock()
 		return
 	}
-	t.manualStop = true
 	t.isRunning = false
-	t.status.State = StateStopped
-	t.status.ConnectedAt = ""
 	cancel := t.cancel
 	forwarder := t.forwarder
 	sshClient := t.sshClient
 	wg := t.wg
-	t.mu.Unlock()
-
 	if cancel != nil {
 		cancel()
 	}
+	t.mu.Unlock()
 
 	// 先关闭 SSH transport，解除正在进行的通道拨号和读写，再等待转发退出。
 	if sshClient != nil {

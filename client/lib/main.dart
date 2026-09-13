@@ -9,6 +9,8 @@ import 'providers.dart';
 import 'widgets.dart';
 import 'services/daemon_client.dart';
 import 'services/daemon_discovery.dart';
+import 'services/desktop_notifications.dart';
+import 'services/recovery_alerts.dart';
 import 'services/settings_store.dart';
 import 'services/tray.dart';
 import 'services/updates.dart';
@@ -96,6 +98,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WindowListener {
   int _selected = 0;
 
   late final AppTray _tray;
+  final _recoveryAlerts = RecoveryAlerts();
+  final _notifications = DesktopNotifications();
 
   static const _destinations = [
     (icon: Icons.swap_horiz_outlined, label: '隧道'),
@@ -154,6 +158,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WindowListener {
   @override
   void dispose() {
     windowManager.removeListener(this);
+    _notifications.dispose();
     _tray.dispose();
     super.dispose();
   }
@@ -223,6 +228,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WindowListener {
 
   /// 真正退出：先销毁托盘图标，再关闭窗口并结束进程。
   Future<void> _quit() async {
+    await _notifications.dispose();
     await _tray.dispose();
     await windowManager.setPreventClose(false);
     await windowManager.destroy();
@@ -275,7 +281,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WindowListener {
       });
     });
 
-    ref.listen(tunnelsProvider, (_, _) => _updateTray());
+    ref.listen(tunnelsProvider, (_, _) { _updateTray(); _updateRecoveryAlerts(); });
     ref.listen(workspacesProvider, (_, _) => _updateTray());
 
     final connection = ref.watch(clientProvider);
@@ -346,6 +352,23 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WindowListener {
     final tunnels = ref.read(tunnelsProvider);
     _tray.updateStatus(client: client, tunnels: tunnels.isLoading ? null : tunnels.valueOrNull,
       instanceLabel: label);
+  }
+
+  void _updateRecoveryAlerts() {
+    final connection = ref.read(clientProvider);
+    final data = ref.read(tunnelsProvider);
+    final client = connection.valueOrNull;
+    final tunnels = data.valueOrNull;
+    if (connection.isLoading || data.isLoading || client == null || tunnels == null) return;
+    final instance = '${client.info.discoveryPath}|${client.info.pid}|${client.info.token}';
+    for (final alert in _recoveryAlerts.update(instance, tunnels)) {
+      _notifications.show(alert, onClick: _showWindow, stillRelevant: () {
+        if (!mounted || !identical(ref.read(clientProvider).valueOrNull, client)) return false;
+        final current = ref.read(tunnelsProvider).valueOrNull ?? <Tunnel>[];
+        return current.any((t) => t.name == alert.name && t.desiredRunning &&
+          (alert.recovered ? t.state == 'connected' : t.state == 'failed' || t.state == 'reconnecting'));
+      });
+    }
   }
 }
 

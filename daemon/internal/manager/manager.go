@@ -100,9 +100,7 @@ func (m *Manager) Stop() {
 		m.mu.RLock()
 		tunnelsToStop := make([]*tunnel.Tunnel, 0)
 		for _, tun := range m.tunnels {
-			if tun.IsRunning() {
-				tunnelsToStop = append(tunnelsToStop, tun)
-			}
+			tunnelsToStop = append(tunnelsToStop, tun)
 		}
 		m.mu.RUnlock()
 
@@ -168,10 +166,6 @@ func (m *Manager) StopTunnel(name string) error {
 
 	if !exists {
 		return fmt.Errorf("tunnel %s not found", name)
-	}
-
-	if !tun.IsRunning() {
-		return fmt.Errorf("tunnel %s is not running", name)
 	}
 
 	tun.Stop()
@@ -350,10 +344,8 @@ func (m *Manager) reloadInternal() error {
 			continue
 		}
 
-		wasRunning := oldTun.IsRunning()
-		if wasRunning {
-			oldTun.Stop()
-		}
+		wasRunning := oldTun.Status().DesiredRunning
+		oldTun.Stop()
 		newTunnels[pt.Name] = newTun
 		if wasRunning {
 			if err := newTun.Start(); err != nil {
@@ -364,7 +356,7 @@ func (m *Manager) reloadInternal() error {
 
 	// Stop tunnels that were removed from the configuration
 	for name, oldTun := range m.tunnels {
-		if _, exists := newTunnels[name]; !exists && oldTun.IsRunning() {
+		if _, exists := newTunnels[name]; !exists {
 			oldTun.Stop()
 		}
 	}
