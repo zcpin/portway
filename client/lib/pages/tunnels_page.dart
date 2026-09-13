@@ -1,12 +1,17 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../connection_preferences_provider.dart';
 import '../models.dart';
+import '../models/connection_preferences.dart';
 import '../providers.dart';
+import '../services/connection_preferences.dart';
 import '../services/daemon_client.dart';
 import '../widgets.dart';
 import 'ssh_security.dart';
 import 'tunnel_diagnostics.dart';
+import 'connection_open_action.dart';
 
 /// 打开隧道新建/编辑对话框，保存成功后刷新列表。
 Future<void> openTunnelEditor(
@@ -15,16 +20,34 @@ Future<void> openTunnelEditor(
   Tunnel? editing,
   Tunnel? initial,
 }) async {
+  final client = ref.read(clientProvider).valueOrNull;
+  final preferences = ref.read(connectionPreferencesStoreProvider);
   final result = await showDialog<Tunnel>(
     context: context,
     builder: (_) => TunnelEditorDialog(editing: editing, initial: initial),
   );
   if (result == null || !context.mounted) return;
 
+  final connection = ref.read(clientProvider);
+  if (connection.isLoading || !identical(connection.valueOrNull, client)) {
+    showErrorSnack(context, StateError('实例连接已变化，请重新编辑'));
+    return;
+  }
+
   try {
     await ref
         .read(tunnelsProvider.notifier)
         .save(result, editingName: editing?.name);
+    if (client != null && editing != null && editing.name != result.name) {
+      try {
+        await preferences.rename(connectionPreferenceScope(client.info), editing.name, result.name);
+        if (context.mounted && identical(ref.read(clientProvider).valueOrNull, client)) {
+          ref.invalidate(connectionPreferencesProvider);
+        }
+      } catch (error) {
+        if (context.mounted) showErrorSnack(context, StateError('隧道已保存，但连接偏好迁移失败：$error'));
+      }
+    }
   } catch (e) {
     if (context.mounted) showErrorSnack(context, e);
   }
@@ -32,7 +55,8 @@ Future<void> openTunnelEditor(
 
 /// 隧道列表页：展示状态并提供启动/停止/重启/编辑/删除。
 class TunnelsPage extends ConsumerStatefulWidget {
-  const TunnelsPage({super.key});
+  const TunnelsPage({super.key, this.active = true});
+  final bool active;
 
   @override
   ConsumerState<TunnelsPage> createState() => _TunnelsPageState();
@@ -43,24 +67,52 @@ class _TunnelsPageState extends ConsumerState<TunnelsPage> {
   String? _group;
   final _selected = <String>{};
   bool _busy = false;
+  bool _favoritesOnly = false;
+  final _searchFocus = FocusNode();
+  static const _favoriteKeys = [LogicalKeyboardKey.digit1, LogicalKeyboardKey.digit2, LogicalKeyboardKey.digit3,
+    LogicalKeyboardKey.digit4, LogicalKeyboardKey.digit5, LogicalKeyboardKey.digit6, LogicalKeyboardKey.digit7,
+    LogicalKeyboardKey.digit8, LogicalKeyboardKey.digit9];
+
+  @override
+  void dispose() { _searchFocus.dispose(); super.dispose(); }
 
   @override
   Widget build(BuildContext context) {
     final tunnels = ref.watch(tunnelsProvider);
-    final all = tunnels.valueOrNull ?? <Tunnel>[];
+    final preferences = ref.watch(connectionPreferencesProvider);
+    final saved = preferences.valueOrNull ?? ConnectionPreferences();
+    final all = saved.sorted(tunnels.valueOrNull ?? <Tunnel>[]);
     final groups = all.map((t) => t.group).toSet().toList()..sort();
     final group = groups.contains(_group) ? _group : null;
-    final visible = all.where((t) => (group == null || t.group == group) &&
+    final visible = all.where((t) => (!_favoritesOnly || saved.favorites.contains(t.name)) && (group == null || t.group == group) &&
       '${t.name} ${t.group} ${t.sshHost} ${t.sshConnection} ${t.remoteHost} ${t.localHost} ${t.modeLabel} ${t.proxyJump.join(' ')}'.toLowerCase().contains(_query)).toList();
     final selected = _selected.intersection(visible.map((t) => t.name).toSet());
 
-    return Scaffold(
+    final favorites = all.where((t) => saved.favorites.contains(t.name)).toList();
+    final mac = Theme.of(context).platform == TargetPlatform.macOS;
+    return CallbackShortcuts(bindings: widget.active ? {
+      SingleActivator(LogicalKeyboardKey.keyF, control: !mac, meta: mac): () => _searchFocus.requestFocus(),
+      SingleActivator(LogicalKeyboardKey.keyN, control: !mac, meta: mac): () => openTunnelEditor(context, ref),
+      SingleActivator(LogicalKeyboardKey.enter, control: !mac, meta: mac): () {
+        if (_busy) return;
+        if (selected.isNotEmpty) {
+          _batch(visible.where((t) => selected.contains(t.name)).every((t) => t.isRunning) ? 'stop' : 'start', selected);
+        } else if (visible.length == 1) { _toggle(visible.single); }
+      },
+      for (var i = 0; i < favorites.length && i < 9; i++)
+        SingleActivator(_favoriteKeys[i], control: !mac, meta: mac, alt: true): () => _toggle(favorites[i]),
+    } : {}, child: Focus(autofocus: widget.active, canRequestFocus: widget.active,
+      descendantsAreFocusable: widget.active, child: Scaffold(
       body: Column(
         children: [
           PageHeader(
             title: '隧道',
             subtitle: '管理本地转发、反向转发和 SOCKS5 代理',
             actions: [
+              IconButton(tooltip: '快捷键', icon: const Icon(Icons.keyboard_outlined), onPressed: () => showDialog<void>(
+                context: context, builder: (context) => AlertDialog(title: const Text('窗口内快捷键'),
+                  content: const Text('Ctrl / ⌘ + F：搜索\nCtrl / ⌘ + N：新建隧道\nCtrl / ⌘ + Enter：启停所选隧道，或唯一的搜索结果\nCtrl / ⌘ + Alt + 1～9：启停前九条收藏'),
+                  actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('关闭'))]))),
               FilledButton.icon(
                 onPressed: () => openTunnelEditor(context, ref),
                 icon: const Icon(Icons.add),
@@ -68,7 +120,10 @@ class _TunnelsPageState extends ConsumerState<TunnelsPage> {
               ),
               const SizedBox(width: 8),
               IconButton(
-                onPressed: () => ref.read(tunnelsProvider.notifier).refresh(),
+                onPressed: () {
+                  ref.invalidate(connectionPreferencesProvider);
+                  ref.read(tunnelsProvider.notifier).refresh();
+                },
                 icon: const Icon(Icons.refresh),
                 tooltip: '刷新',
               ),
@@ -79,9 +134,12 @@ class _TunnelsPageState extends ConsumerState<TunnelsPage> {
             child: Wrap(spacing: 12, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
               SizedBox(width: 250, child: TextField(
                 key: const Key('tunnel-search'),
+                focusNode: _searchFocus,
                 decoration: const InputDecoration(labelText: '搜索名称、主机或分组', prefixIcon: Icon(Icons.search)),
                 onChanged: (value) => setState(() { _query = value.trim().toLowerCase(); _selected.clear(); }),
               )),
+              FilterChip(label: const Text('仅看收藏'), selected: _favoritesOnly,
+                onSelected: (value) => setState(() { _favoritesOnly = value; _selected.clear(); })),
               SizedBox(width: 150, child: DropdownButton<String?>(
                 value: group, isExpanded: true, hint: const Text('全部分组'),
                 items: [
@@ -100,6 +158,8 @@ class _TunnelsPageState extends ConsumerState<TunnelsPage> {
                 icon: const Icon(Icons.stop), label: Text(_busy ? '处理中…' : '批量停止')),
             ]),
           ),
+          if (preferences.hasError) Padding(padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Text('连接偏好读取失败：${describeError(preferences.error!)}', style: TextStyle(color: Theme.of(context).colorScheme.error))),
           Expanded(
             child: tunnels.when(
               loading: () => const Center(child: CircularProgressIndicator()),
@@ -117,9 +177,18 @@ class _TunnelsPageState extends ConsumerState<TunnelsPage> {
                 return ListView.builder(
                   padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
                   itemCount: visible.length,
+                  findChildIndexCallback: (key) {
+                    final index = visible.indexWhere((t) => ValueKey(t.name) == key);
+                    return index < 0 ? null : index;
+                  },
                   itemBuilder: (context, i) => Padding(
+                    key: ValueKey(visible[i].name),
                     padding: const EdgeInsets.only(bottom: 12),
-                    child: TunnelCard(tunnel: visible[i], selected: selected.contains(visible[i].name),
+                    child: TunnelCard(key: ValueKey(visible[i].name), tunnel: visible[i], selected: selected.contains(visible[i].name),
+                      onMoveUp: i > 0 && saved.favorites.contains(visible[i].name) == saved.favorites.contains(visible[i - 1].name)
+                        ? () => ref.read(connectionPreferencesProvider.notifier).move(visible[i].name, visible[i - 1].name, true) : null,
+                      onMoveDown: i + 1 < visible.length && saved.favorites.contains(visible[i].name) == saved.favorites.contains(visible[i + 1].name)
+                        ? () => ref.read(connectionPreferencesProvider.notifier).move(visible[i].name, visible[i + 1].name, false) : null,
                       onSelected: _busy ? null : (value) => setState(() {
                         if (value == true) { _selected.add(visible[i].name); }
                         else { _selected.remove(visible[i].name); }
@@ -131,7 +200,19 @@ class _TunnelsPageState extends ConsumerState<TunnelsPage> {
           ),
         ],
       ),
-    );
+    )));
+  }
+
+  Future<void> _toggle(Tunnel tunnel) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      final results = await ref.read(tunnelsProvider.notifier).batch(tunnel.isRunning ? 'stop' : 'start', [tunnel.name]);
+      if (mounted && results.any((result) => !result.ok)) {
+        showErrorSnack(context, StateError(results.where((result) => !result.ok).map((result) => result.error).join('\n')));
+      }
+    } catch (error) { if (mounted) showErrorSnack(context, error); }
+    finally { if (mounted) setState(() => _busy = false); }
   }
 
   Future<void> _batch(String action, Set<String> names) async {
@@ -159,16 +240,22 @@ class _TunnelsPageState extends ConsumerState<TunnelsPage> {
 }
 
 class TunnelCard extends ConsumerWidget {
-  const TunnelCard({super.key, required this.tunnel, this.selected = false, this.onSelected});
+  const TunnelCard({super.key, required this.tunnel, this.selected = false, this.onSelected, this.onMoveUp, this.onMoveDown});
 
   final Tunnel tunnel;
   final bool selected;
   final ValueChanged<bool?>? onSelected;
+  final Future<void> Function()? onMoveUp;
+  final Future<void> Function()? onMoveDown;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final running = tunnel.isRunning;
+    final preferences = ref.watch(connectionPreferencesProvider);
+    final favorite = preferences.valueOrNull?.favorites.contains(tunnel.name) ?? false;
+    final openAction = preferences.valueOrNull?.openActions[tunnel.name];
+    final local = tunnel.mode.isEmpty || tunnel.mode == 'local';
     final statusColor = switch (tunnel.state) {
       'failed' => theme.colorScheme.error,
       'connecting' || 'reconnecting' => const Color(0xFFB57700),
@@ -185,9 +272,13 @@ class TunnelCard extends ConsumerWidget {
             Row(
               children: [
                 if (onSelected != null) Checkbox(value: selected, onChanged: onSelected),
+                IconButton(tooltip: favorite ? '取消收藏' : '收藏隧道', visualDensity: VisualDensity.compact,
+                  icon: Icon(favorite ? Icons.star : Icons.star_border),
+                  onPressed: preferences.valueOrNull == null ? null : () => _guard(context,
+                    () => ref.read(connectionPreferencesProvider.notifier).toggleFavorite(tunnel.name))),
                 Icon(Icons.circle, size: 10, color: statusColor),
                 const SizedBox(width: 10),
-                Text(tunnel.name, style: theme.textTheme.titleMedium),
+                Flexible(child: Text(tunnel.name, style: theme.textTheme.titleMedium, overflow: TextOverflow.ellipsis)),
                 const SizedBox(width: 10),
                 Container(
                   padding:
@@ -206,6 +297,7 @@ class TunnelCard extends ConsumerWidget {
                   ),
                 ),
                 const Spacer(),
+                if (local && openAction != null) ConnectionOpenButton(key: ValueKey('open-${tunnel.name}'), tunnel: tunnel, action: openAction),
                 if (running)
                   TextButton.icon(
                     onPressed: () => _guard(context,
@@ -232,6 +324,12 @@ class TunnelCard extends ConsumerWidget {
                   onSelected: (v) async {
                     if (v == 'diagnose') {
                       await openTunnelDiagnostics(context, ref, tunnel.name);
+                    } else if (v == 'open_settings') {
+                      await configureConnectionOpenAction(context, ref, tunnel);
+                    } else if (v == 'move_up' && onMoveUp != null) {
+                      await _guard(context, onMoveUp!);
+                    } else if (v == 'move_down' && onMoveDown != null) {
+                      await _guard(context, onMoveDown!);
                     } else if (v == 'cancel_recovery') {
                       await _guard(context, () => ref.read(tunnelsProvider.notifier).stop(tunnel.name));
                     } else if (v == 'edit') {
@@ -259,6 +357,9 @@ class TunnelCard extends ConsumerWidget {
                     }
                   },
                   itemBuilder: (_) => [
+                    if (local) const PopupMenuItem(value: 'open_settings', child: Text('配置打开方式')),
+                    PopupMenuItem(value: 'move_up', enabled: onMoveUp != null, child: const Text('上移')),
+                    PopupMenuItem(value: 'move_down', enabled: onMoveDown != null, child: const Text('下移')),
                     const PopupMenuItem(value: 'diagnose', child: Text('诊断连接')),
                     if (!running && tunnel.desiredRunning)
                       const PopupMenuItem(value: 'cancel_recovery', child: Text('停止自动恢复')),

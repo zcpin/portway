@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'models.dart';
+import 'connection_preferences_provider.dart';
 import 'providers.dart';
 import 'widgets.dart';
 import 'services/daemon_client.dart';
@@ -115,7 +116,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WindowListener {
 
   /// 导航对应的页面。设置 / 关于无需连接 daemon 即可渲染。
   List<Widget> get _pages => [
-    const TunnelsPage(),
+    TunnelsPage(active: _selected == 0),
     const ConnectionsPage(),
     const KeysPage(),
     const LogsPage(),
@@ -131,6 +132,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WindowListener {
     _tray = AppTray(
       onShowWindow: _showWindow,
       onQuit: _quit,
+      onOpenConnection: (client, name, action) async {
+        await ref.read(externalConnectionLauncherProvider).open(client, name, action,
+          stillCurrent: () => mounted && !ref.read(clientProvider).isLoading &&
+            identical(ref.read(clientProvider).valueOrNull, client));
+      },
       isCurrentClient: (client) => mounted && !ref.read(clientProvider).isLoading &&
           identical(ref.read(clientProvider).valueOrNull, client),
       onTunnelsChanged: (client) async {
@@ -283,6 +289,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WindowListener {
 
     ref.listen(tunnelsProvider, (_, _) { _updateTray(); _updateRecoveryAlerts(); });
     ref.listen(workspacesProvider, (_, _) => _updateTray());
+    ref.listen(connectionPreferencesProvider, (_, _) => _updateTray());
 
     final connection = ref.watch(clientProvider);
 
@@ -351,7 +358,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WindowListener {
     }
     final tunnels = ref.read(tunnelsProvider);
     _tray.updateStatus(client: client, tunnels: tunnels.isLoading ? null : tunnels.valueOrNull,
-      instanceLabel: label);
+      instanceLabel: label, preferences: ref.read(connectionPreferencesProvider).valueOrNull);
   }
 
   void _updateRecoveryAlerts() {

@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:tray_manager/tray_manager.dart';
 
 import '../models.dart';
+import '../models/connection_preferences.dart';
 import 'daemon_client.dart';
 import 'tray_menu.dart';
 
@@ -19,6 +20,7 @@ class AppTray with TrayListener {
     required this.isCurrentClient,
     required this.onTunnelsChanged,
     required this.onError,
+    this.onOpenConnection,
   }) {
     // 只注册一次：init 失败后重试不应重复注册回调
     trayManager.addListener(this);
@@ -33,6 +35,12 @@ class AppTray with TrayListener {
   final bool Function(DaemonClient client) isCurrentClient;
   final Future<void> Function(DaemonClient client) onTunnelsChanged;
   final Future<void> Function(Object error) onError;
+  final Future<void> Function(
+    DaemonClient client,
+    String name,
+    ConnectionOpenAction action,
+  )?
+  onOpenConnection;
 
   static const _keyShow = 'show_window';
   static const _keyQuit = 'exit_app';
@@ -46,6 +54,7 @@ class AppTray with TrayListener {
   DaemonClient? _busyClient;
   List<Tunnel>? _tunnels;
   String? _instanceLabel;
+  ConnectionPreferences? _preferences;
   Map<String, TrayTunnelAction> _actions = const {};
 
   /// 初始化托盘图标与菜单。失败不影响主窗口使用。
@@ -114,12 +123,14 @@ class AppTray with TrayListener {
     DaemonClient? client,
     List<Tunnel>? tunnels,
     String? instanceLabel,
+    ConnectionPreferences? preferences,
   }) {
     _client = client;
     _tunnels = client == null || tunnels == null
         ? null
         : List.unmodifiable(tunnels);
     _instanceLabel = client == null ? null : instanceLabel;
+    _preferences = client == null ? null : preferences;
     return _refreshMenu();
   }
 
@@ -134,6 +145,7 @@ class AppTray with TrayListener {
         revision: revision,
         tunnels: _tunnels,
         instanceLabel: _instanceLabel,
+        preferences: _preferences,
         busy: _busyClient != null && identical(_busyClient, _client),
       );
       try {
@@ -156,6 +168,13 @@ class AppTray with TrayListener {
     try {
       if (action.command == 'copy') {
         await Clipboard.setData(ClipboardData(text: action.address!));
+      } else if (action.command == 'open') {
+        final open = onOpenConnection;
+        if (open == null || action.openAction == null) {
+          throw StateError('打开方式不可用');
+        }
+        await open(client, action.names.single, action.openAction!);
+        if (_current(client)) await onTunnelsChanged(client);
       } else {
         final results = await client.batchTunnels(action.command, action.names);
         if (!_current(client)) return;

@@ -59,6 +59,7 @@ Future<_Rows> _showPage(WidgetTester tester) async {
     ProviderScope(
       overrides: [
         tunnelsProvider.overrideWith(() => rows),
+        clientProvider.overrideWith((ref) async => null),
         sshConnectionsProvider.overrideWith(_NoConnections.new),
       ],
       child: const MaterialApp(home: TunnelsPage()),

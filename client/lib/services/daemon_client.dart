@@ -20,6 +20,7 @@ class DaemonClient {
   WebSocket? _socket;
   HttpClient? _connectingClient;
   bool _closed = false;
+  bool get isClosed => _closed;
 
   /// [connectTimeout] 供服务发现阶段使用：遍历多个候选位置时，
   /// 指向已退出进程的陈旧条目应当很快失败，而不是每个都等满默认超时。

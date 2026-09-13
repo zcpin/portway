@@ -7,7 +7,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ssh_tunnel_client/connection_preferences_provider.dart';
 import 'package:ssh_tunnel_client/models.dart';
+import 'package:ssh_tunnel_client/models/connection_preferences.dart';
 import 'package:ssh_tunnel_client/models/tunnel_diagnostic.dart';
 import 'package:ssh_tunnel_client/pages/tunnel_diagnostics.dart';
 import 'package:ssh_tunnel_client/pages/tunnels_page.dart';
@@ -65,6 +67,11 @@ class _DirectHttpOverrides extends HttpOverrides {
   @override
   HttpClient createHttpClient(SecurityContext? context) =>
       super.createHttpClient(context)..findProxy = (_) => 'DIRECT';
+}
+
+class _EmptyConnectionPreferences extends ConnectionPreferencesNotifier {
+  @override
+  Future<ConnectionPreferences> build() async => ConnectionPreferences();
 }
 
 void main() {
@@ -143,7 +150,12 @@ void main() {
         ),
       );
       final container = ProviderContainer(
-        overrides: [clientProvider.overrideWith((ref) async => client)],
+        overrides: [
+          clientProvider.overrideWith((ref) async => client),
+          connectionPreferencesProvider.overrideWith(
+            _EmptyConnectionPreferences.new,
+          ),
+        ],
       );
       addTearDown(container.dispose);
       await container.read(clientProvider.future);

@@ -1,14 +1,20 @@
 import 'package:tray_manager/tray_manager.dart';
 
 import '../models.dart';
+import '../models/connection_preferences.dart';
 
 class TrayTunnelAction {
   final String command;
   final List<String> names;
   final String? address;
+  final ConnectionOpenAction? openAction;
 
-  TrayTunnelAction(this.command, Iterable<String> names, {this.address})
-    : names = List.unmodifiable(names);
+  TrayTunnelAction(
+    this.command,
+    Iterable<String> names, {
+    this.address,
+    this.openAction,
+  }) : names = List.unmodifiable(names);
 }
 
 /// A menu and its commands share one revision, so clicks from replaced menus
@@ -23,6 +29,7 @@ class TunnelTrayMenu {
     required int revision,
     List<Tunnel>? tunnels,
     String? instanceLabel,
+    ConnectionPreferences? preferences,
     bool busy = false,
   }) {
     final actions = <String, TrayTunnelAction>{};
@@ -37,8 +44,43 @@ class TunnelTrayMenu {
       return MenuItem(key: key, label: label, disabled: busy || disabled);
     }
 
+    MenuItem tunnelItem(Tunnel tunnel) {
+      final openAction = preferences?.openActions[tunnel.name];
+      return MenuItem.submenu(
+        label: '${tunnel.name} · ${tunnel.stateLabel}',
+        submenu: Menu(
+          items: [
+            command(
+              tunnel.isRunning ? '停止' : '启动',
+              TrayTunnelAction(tunnel.isRunning ? 'stop' : 'start', [
+                tunnel.name,
+              ]),
+            ),
+            if (!tunnel.isRunning && tunnel.desiredRunning)
+              command('停止自动恢复', TrayTunnelAction('stop', [tunnel.name])),
+            if (openAction != null &&
+                (tunnel.mode.isEmpty || tunnel.mode == 'local'))
+              command(
+                tunnel.state == 'connected' ? '打开服务' : '启动并打开服务',
+                TrayTunnelAction('open', [tunnel.name], openAction: openAction),
+              ),
+            command(
+              tunnel.mode == 'remote' ? '复制远端监听地址' : '复制本地连接地址',
+              TrayTunnelAction('copy', [
+                tunnel.name,
+              ], address: _address(tunnel)),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final ordered = preferences?.sorted(tunnels ?? []) ?? tunnels ?? <Tunnel>[];
+    final favorites = ordered
+        .where((t) => preferences?.favorites.contains(t.name) == true)
+        .toList();
     final groups = <String, List<Tunnel>>{};
-    for (final tunnel in tunnels ?? <Tunnel>[]) {
+    for (final tunnel in ordered) {
       groups.putIfAbsent(tunnel.group, () => []).add(tunnel);
     }
     final groupNames = groups.keys.toList()..sort();
@@ -54,6 +96,11 @@ class TunnelTrayMenu {
         if (busy) MenuItem(label: '正在执行操作…', disabled: true),
         if (tunnels != null && tunnels.isEmpty)
           MenuItem(label: '尚未配置隧道', disabled: true),
+        if (favorites.isNotEmpty)
+          MenuItem.submenu(
+            label: '收藏（${favorites.length}）',
+            submenu: Menu(items: favorites.map(tunnelItem).toList()),
+          ),
         for (final group in groupNames)
           MenuItem.submenu(
             label: group.isEmpty ? '未分组' : group,
@@ -67,32 +114,12 @@ class TunnelTrayMenu {
                 command(
                   '停止本组全部',
                   TrayTunnelAction('stop', groups[group]!.map((t) => t.name)),
-                  disabled: groups[group]!.every((t) => !t.isRunning && !t.desiredRunning),
+                  disabled: groups[group]!.every(
+                    (t) => !t.isRunning && !t.desiredRunning,
+                  ),
                 ),
                 MenuItem.separator(),
-                for (final tunnel in groups[group]!)
-                  MenuItem.submenu(
-                    label: '${tunnel.name} · ${tunnel.stateLabel}',
-                    submenu: Menu(
-                      items: [
-                        command(
-                          tunnel.isRunning ? '停止' : '启动',
-                          TrayTunnelAction(
-                            tunnel.isRunning ? 'stop' : 'start',
-                            [tunnel.name],
-                          ),
-                        ),
-                        if (!tunnel.isRunning && tunnel.desiredRunning)
-                          command('停止自动恢复', TrayTunnelAction('stop', [tunnel.name])),
-                        command(
-                          tunnel.mode == 'remote' ? '复制远端监听地址' : '复制本地连接地址',
-                          TrayTunnelAction('copy', [
-                            tunnel.name,
-                          ], address: _address(tunnel)),
-                        ),
-                      ],
-                    ),
-                  ),
+                for (final tunnel in groups[group]!) tunnelItem(tunnel),
               ],
             ),
           ),
