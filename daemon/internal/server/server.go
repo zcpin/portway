@@ -112,6 +112,7 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("POST /api/tunnels/{name}/start", s.auth(http.HandlerFunc(s.handleStartTunnel)))
 	mux.Handle("POST /api/tunnels/{name}/stop", s.auth(http.HandlerFunc(s.handleStopTunnel)))
 	mux.Handle("POST /api/tunnels/{name}/restart", s.auth(http.HandlerFunc(s.handleRestartTunnel)))
+	mux.Handle("POST /api/tunnels/{name}/diagnose", s.auth(http.HandlerFunc(s.handleDiagnoseTunnel)))
 
 	mux.Handle("GET /api/ssh-connections", s.auth(http.HandlerFunc(s.handleListSSH)))
 	mux.Handle("POST /api/ssh-connections/test", s.auth(http.HandlerFunc(s.handleTestSSH)))

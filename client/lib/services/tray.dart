@@ -4,6 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:tray_manager/tray_manager.dart';
 
+import '../models.dart';
+import 'daemon_client.dart';
+import 'tray_menu.dart';
+
 /// 系统托盘：关闭窗口时把程序收进托盘，保持后台常驻。
 ///
 /// 隧道由 daemon 维持，客户端窗口本身不需要一直开着；
@@ -12,6 +16,9 @@ class AppTray with TrayListener {
   AppTray({
     required this.onShowWindow,
     required this.onQuit,
+    required this.isCurrentClient,
+    required this.onTunnelsChanged,
+    required this.onError,
   }) {
     // 只注册一次：init 失败后重试不应重复注册回调
     trayManager.addListener(this);
@@ -23,23 +30,42 @@ class AppTray with TrayListener {
   /// 请求退出程序。
   final VoidCallback onQuit;
 
+  final bool Function(DaemonClient client) isCurrentClient;
+  final Future<void> Function(DaemonClient client) onTunnelsChanged;
+  final Future<void> Function(Object error) onError;
+
   static const _keyShow = 'show_window';
   static const _keyQuit = 'exit_app';
 
   bool _initialized = false;
+  bool _disposed = false;
+  Future<void>? _initializing;
+  Future<void> _menuQueue = Future.value();
+  int _revision = 0;
+  DaemonClient? _client;
+  DaemonClient? _busyClient;
+  List<Tunnel>? _tunnels;
+  String? _instanceLabel;
+  Map<String, TrayTunnelAction> _actions = const {};
 
   /// 初始化托盘图标与菜单。失败不影响主窗口使用。
-  Future<void> init() async {
-    if (_initialized) return;
+  Future<void> init() {
+    if (_initialized || _disposed) return Future.value();
+    return _initializing ??= _initialize();
+  }
 
+  Future<void> _initialize() async {
     try {
       await trayManager.setIcon(await _resolveIconPath());
-      await trayManager.setToolTip('SSH 隧道管理器');
-      await _setMenu(null);
       _initialized = true;
+      if (_disposed) return;
+      await trayManager.setToolTip('SSH 隧道管理器');
+      await _refreshMenu();
     } catch (e) {
       // 托盘在某些 Linux 桌面环境下不可用，忽略即可
       debugPrint('初始化系统托盘失败: $e');
+    } finally {
+      _initializing = null;
     }
   }
 
@@ -53,13 +79,16 @@ class AppTray with TrayListener {
   /// 临时文件名带内容指纹：图标换版后自动写入新文件，不会因为 %TEMP% 里
   /// 残留旧图而一直显示旧图标。
   Future<String> _resolveIconPath() async {
-    final assetName =
-        Platform.isWindows ? 'assets/tray_icon.ico' : 'assets/tray_icon.png';
+    final assetName = Platform.isWindows
+        ? 'assets/tray_icon.ico'
+        : 'assets/tray_icon.png';
     final suffix = Platform.isWindows ? '.ico' : '.png';
 
     final data = await rootBundle.load(assetName);
-    final bytes =
-        data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
+    final bytes = data.buffer.asUint8List(
+      data.offsetInBytes,
+      data.lengthInBytes,
+    );
     final file = File(
       '${Directory.systemTemp.path}${Platform.pathSeparator}'
       'ssh_tunnel_tray_icon_${_fnv1a(bytes).toRadixString(16)}$suffix',
@@ -80,34 +109,72 @@ class AppTray with TrayListener {
     return hash;
   }
 
-  /// 更新托盘菜单。runningCount 为运行中的隧道数量（null 表示未连接）。
-  Future<void> updateStatus({int? runningCount}) async {
-    if (!_initialized) return;
-    try {
-      await _setMenu(runningCount);
-    } catch (_) {
-      // 菜单更新失败无关紧要
-    }
+  /// Keep the current snapshot even before the native icon finishes loading.
+  Future<void> updateStatus({
+    DaemonClient? client,
+    List<Tunnel>? tunnels,
+    String? instanceLabel,
+  }) {
+    _client = client;
+    _tunnels = client == null || tunnels == null
+        ? null
+        : List.unmodifiable(tunnels);
+    _instanceLabel = client == null ? null : instanceLabel;
+    return _refreshMenu();
   }
 
-  Future<void> _setMenu(int? runningCount) async {
-    final statusLabel = switch (runningCount) {
-      null => 'daemon 未连接',
-      int n when n > 0 => '$n 条隧道运行中',
-      _ => '没有运行中的隧道',
-    };
+  Future<void> _refreshMenu() {
+    _revision++;
+    _actions = const {};
+    if (!_initialized || _disposed) return Future.value();
+    _menuQueue = _menuQueue.then((_) async {
+      if (_disposed) return;
+      final revision = _revision;
+      final snapshot = TunnelTrayMenu.build(
+        revision: revision,
+        tunnels: _tunnels,
+        instanceLabel: _instanceLabel,
+        busy: _busyClient != null && identical(_busyClient, _client),
+      );
+      try {
+        await trayManager.setContextMenu(snapshot.menu);
+        if (!_disposed && revision == _revision) _actions = snapshot.actions;
+      } catch (error) {
+        debugPrint('更新托盘菜单失败: $error');
+      }
+    });
+    return _menuQueue;
+  }
 
-    await trayManager.setContextMenu(
-      Menu(
-        items: [
-          MenuItem(label: statusLabel, disabled: true),
-          MenuItem.separator(),
-          MenuItem(key: _keyShow, label: '显示窗口'),
-          MenuItem.separator(),
-          MenuItem(key: _keyQuit, label: '退出'),
-        ],
-      ),
-    );
+  bool _current(DaemonClient client) =>
+      !_disposed && identical(_client, client) && isCurrentClient(client);
+
+  Future<void> _run(TrayTunnelAction action, DaemonClient client) async {
+    if (!_current(client) || identical(_busyClient, client)) return;
+    _busyClient = client;
+    _refreshMenu();
+    try {
+      if (action.command == 'copy') {
+        await Clipboard.setData(ClipboardData(text: action.address!));
+      } else {
+        final results = await client.batchTunnels(action.command, action.names);
+        if (!_current(client)) return;
+        await onTunnelsChanged(client);
+        final failures = results.where((result) => !result.ok).toList();
+        if (failures.isNotEmpty) {
+          throw StateError(
+            failures
+                .map((result) => '${result.name}：${result.error}')
+                .join('\n'),
+          );
+        }
+      }
+    } catch (error) {
+      if (_current(client)) await onError(error);
+    } finally {
+      if (identical(_busyClient, client)) _busyClient = null;
+      await _refreshMenu();
+    }
   }
 
   @override
@@ -132,11 +199,19 @@ class AppTray with TrayListener {
         onShowWindow();
       case _keyQuit:
         onQuit();
+      default:
+        final action = _actions[menuItem.key];
+        final client = _client;
+        if (action != null && client != null) _run(action, client);
     }
   }
 
   Future<void> dispose() async {
+    _disposed = true;
+    _actions = const {};
     trayManager.removeListener(this);
+    await _initializing;
+    await _menuQueue;
     if (!_initialized) return;
     await trayManager.destroy();
     _initialized = false;

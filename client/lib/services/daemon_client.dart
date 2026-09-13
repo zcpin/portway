@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 
 import '../models.dart';
+import '../models/tunnel_diagnostic.dart';
 
 /// WebSocket 断线后的重连间隔。
 const _reconnectDelay = Duration(seconds: 2);
@@ -105,6 +106,12 @@ class DaemonClient {
 
   Future<void> restartTunnel(String name) =>
       _post('/api/tunnels/${Uri.encodeComponent(name)}/restart', null);
+
+  Future<TunnelDiagnostic> diagnoseTunnel(String name, {CancelToken? cancelToken}) async {
+    final response = await _dio.post('/api/tunnels/${Uri.encodeComponent(name)}/diagnose',
+      cancelToken: cancelToken, options: Options(receiveTimeout: const Duration(seconds: 15)));
+    return TunnelDiagnostic.fromJson((response.data as Map).cast<String, dynamic>());
+  }
 
   Future<void> addSshConnection(SshConnection c) =>
       _post('/api/ssh-connections', c.toJson());

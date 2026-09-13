@@ -6,6 +6,7 @@ import '../providers.dart';
 import '../services/daemon_client.dart';
 import '../widgets.dart';
 import 'ssh_security.dart';
+import 'tunnel_diagnostics.dart';
 
 /// 打开隧道新建/编辑对话框，保存成功后刷新列表。
 Future<void> openTunnelEditor(
@@ -229,7 +230,9 @@ class TunnelCard extends ConsumerWidget {
                 const SizedBox(width: 8),
                 PopupMenuButton<String>(
                   onSelected: (v) async {
-                    if (v == 'edit') {
+                    if (v == 'diagnose') {
+                      await openTunnelDiagnostics(context, ref, tunnel.name);
+                    } else if (v == 'edit') {
                       await openTunnelEditor(context, ref, editing: tunnel);
                     } else if (v == 'copy') {
                       final all = ref.read(tunnelsProvider).valueOrNull ?? [];
@@ -254,6 +257,7 @@ class TunnelCard extends ConsumerWidget {
                     }
                   },
                   itemBuilder: (_) => const [
+                    PopupMenuItem(value: 'diagnose', child: Text('诊断连接')),
                     PopupMenuItem(value: 'edit', child: Text('编辑')),
                     PopupMenuItem(value: 'copy', child: Text('复制配置')),
                     PopupMenuItem(value: 'delete', child: Text('删除')),

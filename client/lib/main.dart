@@ -6,6 +6,7 @@ import 'package:window_manager/window_manager.dart';
 
 import 'models.dart';
 import 'providers.dart';
+import 'widgets.dart';
 import 'services/daemon_client.dart';
 import 'services/daemon_discovery.dart';
 import 'services/settings_store.dart';
@@ -126,6 +127,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WindowListener {
     _tray = AppTray(
       onShowWindow: _showWindow,
       onQuit: _quit,
+      isCurrentClient: (client) => mounted && !ref.read(clientProvider).isLoading &&
+          identical(ref.read(clientProvider).valueOrNull, client),
+      onTunnelsChanged: (client) async {
+        if (mounted && identical(ref.read(clientProvider).valueOrNull, client)) {
+          await ref.read(tunnelsProvider.notifier).refresh();
+        }
+      },
+      onError: (error) async {
+        if (!mounted) return;
+        await _showWindow();
+        if (mounted) showErrorSnack(context, error);
+      },
     );
     _tray.init();
 
@@ -255,18 +268,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WindowListener {
     });
 
     ref.listen(clientProvider, (previous, next) {
+      _updateTray();
       ref.read(logsProvider.notifier).clear();
       next.whenData((client) {
         if (client != null) ref.read(logsProvider.notifier).loadHistory();
       });
     });
 
-    // 让托盘菜单反映当前运行中的隧道数量
-    ref.listen(tunnelsProvider, (_, next) {
-      _tray.updateStatus(
-        runningCount: next.valueOrNull?.where((t) => t.isRunning).length,
-      );
-    });
+    ref.listen(tunnelsProvider, (_, _) => _updateTray());
+    ref.listen(workspacesProvider, (_, _) => _updateTray());
 
     final connection = ref.watch(clientProvider);
 
@@ -318,6 +328,24 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WindowListener {
         ],
       ),
     );
+  }
+
+  void _updateTray() {
+    final connection = ref.read(clientProvider);
+    final client = connection.isLoading ? null : connection.valueOrNull;
+    var label = client?.info.sourceLabel;
+    final preferences = ref.read(workspacesProvider).valueOrNull;
+    if (client != null && preferences != null) {
+      for (final workspace in preferences.workspaces) {
+        if (DaemonDiscovery.samePath(workspace.discoveryPath, client.info.discoveryPath)) {
+          label = workspace.name;
+          break;
+        }
+      }
+    }
+    final tunnels = ref.read(tunnelsProvider);
+    _tray.updateStatus(client: client, tunnels: tunnels.isLoading ? null : tunnels.valueOrNull,
+      instanceLabel: label);
   }
 }
 
