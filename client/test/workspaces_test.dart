@@ -10,6 +10,7 @@ import 'package:ssh_tunnel_client/pages/workspace_switcher.dart';
 import 'package:ssh_tunnel_client/providers.dart';
 import 'package:ssh_tunnel_client/services/daemon_client.dart';
 import 'package:ssh_tunnel_client/services/daemon_discovery.dart';
+import 'package:ssh_tunnel_client/services/tunnel_engine.dart';
 import 'package:ssh_tunnel_client/services/workspaces.dart';
 
 class _Preferences extends WorkspacesNotifier {
@@ -75,6 +76,24 @@ class _ScopedClient extends DaemonClient {
           }),
         ]
       : history!.future;
+}
+
+/// 只用于界面测试的假引擎：工作区切换器只读取 [info]，
+/// 其余接口不会被调用，统一抛 [UnimplementedError]。
+class _FakeEngine implements TunnelEngine {
+  _FakeEngine(this.info);
+
+  @override
+  final DaemonInfo info;
+
+  @override
+  bool get isClosed => false;
+
+  @override
+  void close() {}
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError();
 }
 
 void main() {
@@ -237,6 +256,109 @@ void main() {
     await Future.wait([refresh, history]);
     expect(container.read(tunnelsProvider).valueOrNull!.single.name, 'new');
     expect(container.read(logsProvider).single.message, 'new');
+  });
+
+  testWidgets('进程内引擎下不列出残留的 daemon 发现候选', (tester) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final engine = _FakeEngine(
+      const DaemonInfo(
+        host: 'embedded',
+        port: 0,
+        token: '',
+        pid: 0,
+        version: 'test',
+        configPath: 'embedded-config',
+        embedded: true,
+      ),
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          workspacesProvider.overrideWith(
+            () => _Preferences(const WorkspacePreferences()),
+          ),
+          discoveryProvider.overrideWith(
+            (ref) async => [
+              DaemonCandidate(
+                path: 'stale.json',
+                info: DaemonInfo(
+                  host: '127.0.0.1',
+                  port: 51437,
+                  token: 'stale',
+                  pid: 0,
+                  version: 'test',
+                  configPath: '',
+                ),
+              ),
+            ],
+          ),
+          instanceAvailabilityProvider.overrideWith((ref) async => {}),
+          clientProvider.overrideWith((ref) async => engine),
+        ],
+        child: const MaterialApp(home: Scaffold(body: WorkspaceSwitcher())),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('workspace-selector')));
+    await tester.pumpAndSettle();
+    // 下拉里只有「自动选择实例」，不应出现残留的 daemon 候选及其地址。
+    expect(find.textContaining('51437'), findsNothing);
+    expect(find.textContaining('用户进程'), findsNothing);
+    // DropdownButton 会同时渲染按钮上的选中项与菜单项，故用 findsWidgets。
+    expect(find.text('自动选择实例'), findsWidgets);
+  });
+
+  testWidgets('daemon 候选离线时不展示连接地址', (tester) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final engine = _FakeEngine(
+      const DaemonInfo(
+        host: '127.0.0.1',
+        port: 1,
+        token: 'live',
+        pid: 0,
+        version: 'test',
+        configPath: '',
+      ),
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          workspacesProvider.overrideWith(
+            () => _Preferences(const WorkspacePreferences()),
+          ),
+          discoveryProvider.overrideWith(
+            (ref) async => [
+              DaemonCandidate(
+                path: 'stale.json',
+                info: DaemonInfo(
+                  host: '127.0.0.1',
+                  port: 51437,
+                  token: 'stale',
+                  pid: 0,
+                  version: 'test',
+                  configPath: '',
+                ),
+              ),
+            ],
+          ),
+          instanceAvailabilityProvider.overrideWith((ref) async => {}),
+          clientProvider.overrideWith((ref) async => engine),
+        ],
+        child: const MaterialApp(home: Scaffold(body: WorkspaceSwitcher())),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('workspace-selector')));
+    await tester.pumpAndSettle();
+    // daemon 模式下列出候选，但离线条目不携带假地址。
+    expect(find.text('用户进程 · 离线'), findsOneWidget);
+    expect(find.textContaining('51437'), findsNothing);
   });
 
   testWidgets('实例选择与创建工作区交互', (tester) async {

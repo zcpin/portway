@@ -74,11 +74,21 @@ class _WorkspaceSwitcherState extends ConsumerState<WorkspaceSwitcher> {
               '${workspace.name} · ${isOnline ? '在线' : '未连接'}',
             ));
           }
-          for (final candidate in candidates) {
-            if (!known(candidate.path)) {
+          // 进程内引擎不依赖发现文件，此时 daemon 候选只是残留（例如卸载后
+          // 遗留的 daemon.json），列出来会让人误以为还在通过 HTTP 通信，
+          // 因此仅在 daemon 模式下列出这些候选。
+          final usesDaemon = engine == null || !engine.info.embedded;
+          if (usesDaemon) {
+            for (final candidate in candidates) {
+              if (known(candidate.path)) continue;
+              final online = onlinePath(candidate.path);
               entries.add((
                 candidate.path,
-                '${candidate.info.sourceLabel} · ${candidate.info.httpBase} · ${onlinePath(candidate.path) ? '在线' : '离线'}',
+                online
+                    ? '${candidate.info.sourceLabel} · ${candidate.info.httpBase} · 在线'
+                    // 离线时不展示地址：陈旧发现文件里的端口无人监听，
+                    // 把它当成连接地址显示会误导用户。
+                    : '${candidate.info.sourceLabel} · 离线',
               ));
             }
           }
