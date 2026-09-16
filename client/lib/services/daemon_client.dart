@@ -1,11 +1,15 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
 
 import '../models.dart';
 import '../models/tunnel_diagnostic.dart';
+import 'tunnel_engine.dart';
+
+// [describeError] 现在定义在接口层（两种引擎共用），这里继续对外导出，
+// 避免已有 `import 'daemon_client.dart' show describeError;` 的调用点失效。
+export 'tunnel_engine.dart' show describeError;
 
 /// WebSocket 断线后的重连间隔。
 const _reconnectDelay = Duration(seconds: 2);
@@ -13,13 +17,18 @@ const _reconnectDelay = Duration(seconds: 2);
 /// 与本地 daemon 通信的客户端：REST 走 Dio，事件流走 WebSocket。
 ///
 /// 所有请求自动带上 token（daemon 每次启动会重新生成，通过服务发现文件获取）。
-class DaemonClient {
+///
+/// 实现 [TunnelEngine]，因此可以与进程内引擎（[EmbeddedEngine]）互换：
+/// provider 与页面只依赖接口，不关心引擎是以独立进程还是动态库的形式存在。
+class DaemonClient implements TunnelEngine {
+  @override
   final DaemonInfo info;
   final Dio _dio;
   final Duration _connectTimeout;
   WebSocket? _socket;
   HttpClient? _connectingClient;
   bool _closed = false;
+  @override
   bool get isClosed => _closed;
 
   /// [connectTimeout] 供服务发现阶段使用：遍历多个候选位置时，
@@ -49,6 +58,7 @@ class DaemonClient {
   ///
   /// daemon 重启后会更换端口与 token，此时返回 false，
   /// 调用方应重新读取服务发现文件并重建客户端。
+  @override
   Future<bool> checkAuth() async {
     try {
       final resp = await _dio.get('/api/status');
@@ -58,16 +68,19 @@ class DaemonClient {
     }
   }
 
+  @override
   Future<List<Tunnel>> getTunnels() async {
     final resp = await _dio.get('/api/tunnels');
     return (resp.data as List).map((e) => Tunnel.fromJson(e)).toList();
   }
 
+  @override
   Future<List<SshConnection>> getSshConnections() async {
     final resp = await _dio.get('/api/ssh-connections');
     return (resp.data as List).map((e) => SshConnection.fromJson(e)).toList();
   }
 
+  @override
   Future<ConnectionDiagnostic> testSshConnection(
     SshConnection connection, {CancelToken? cancelToken}
   ) async {
@@ -76,50 +89,63 @@ class DaemonClient {
     return ConnectionDiagnostic.fromJson(response.data);
   }
 
+  @override
   Future<List<KeyInfo>> getKeys() async {
     final resp = await _dio.get('/api/keys');
     return (resp.data as List).map((e) => KeyInfo.fromJson(e)).toList();
   }
 
+  @override
   Future<List<LogEntry>> getLogs() async {
     final resp = await _dio.get('/api/logs');
     return (resp.data as List).map((e) => LogEntry.fromJson(e)).toList();
   }
 
+  @override
   Future<void> addTunnel(Tunnel t) => _post('/api/tunnels', t.toJson());
 
+  @override
   Future<void> updateTunnel(String name, Tunnel t) =>
       _put('/api/tunnels/${Uri.encodeComponent(name)}', t.toJson());
 
+  @override
   Future<void> deleteTunnel(String name) =>
       _delete('/api/tunnels/${Uri.encodeComponent(name)}');
 
+  @override
   Future<void> startTunnel(String name) =>
       _post('/api/tunnels/${Uri.encodeComponent(name)}/start', null);
 
+  @override
   Future<List<BatchResult>> batchTunnels(String action, List<String> names) async {
     final response = await _dio.post('/api/tunnels/batch', data: {'action': action, 'names': names});
     return (response.data as List).map((value) => BatchResult.fromJson(value)).toList();
   }
 
+  @override
   Future<void> stopTunnel(String name) =>
       _post('/api/tunnels/${Uri.encodeComponent(name)}/stop', null);
 
+  @override
   Future<void> restartTunnel(String name) =>
       _post('/api/tunnels/${Uri.encodeComponent(name)}/restart', null);
 
+  @override
   Future<TunnelDiagnostic> diagnoseTunnel(String name, {CancelToken? cancelToken}) async {
     final response = await _dio.post('/api/tunnels/${Uri.encodeComponent(name)}/diagnose',
       cancelToken: cancelToken, options: Options(receiveTimeout: const Duration(seconds: 15)));
     return TunnelDiagnostic.fromJson((response.data as Map).cast<String, dynamic>());
   }
 
+  @override
   Future<void> addSshConnection(SshConnection c) =>
       _post('/api/ssh-connections', c.toJson());
 
+  @override
   Future<void> updateSshConnection(String name, SshConnection c) =>
       _put('/api/ssh-connections/${Uri.encodeComponent(name)}', c.toJson());
 
+  @override
   Future<void> deleteSshConnection(String name) =>
       _delete('/api/ssh-connections/${Uri.encodeComponent(name)}');
 
@@ -128,6 +154,7 @@ class DaemonClient {
   /// 私钥以本地路径的形式引用（不上传），但客户端与 daemon 可能处于不同的
   /// 文件系统语境（尤其是 daemon 以系统服务运行时），因此选完文件后交给
   /// daemon 确认一次，避免配置写入后才发现读不到。
+  @override
   Future<KeyInfo> statKey(String path) async {
     final resp = await _dio.get(
       '/api/keys/stat',
@@ -136,43 +163,55 @@ class DaemonClient {
     return KeyInfo.fromJson(resp.data);
   }
 
+  @override
   Future<void> unlockKey(String path, String passphrase) => _post('/api/keys/unlock', {'path': path, 'passphrase': passphrase});
+  @override
   Future<void> lockKey(String path) => _post('/api/keys/lock', {'path': path});
+  @override
   Future<HostKeyInfo> inspectHostKey(SshConnection connection) async =>
       HostKeyInfo.fromJson((await _dio.post('/api/ssh-connections/host-key', data: connection.toJson())).data);
+  @override
   Future<HostKeyInfo> trustHostKey(SshConnection connection, String fingerprint, bool replace) async =>
       HostKeyInfo.fromJson((await _dio.post('/api/ssh-connections/trust',
         data: {'connection': connection.toJson(), 'fingerprint': fingerprint, 'replace': replace})).data);
 
   Future<void> reload() => _post('/api/reload', null);
 
+  @override
   Future<ConfigExport> exportConfig() async => ConfigExport.fromJson((await _dio.get('/api/config/export')).data);
 
+  @override
   Future<ImportPreview> previewImport(String content, String mode) async =>
       ImportPreview.fromJson((await _dio.post('/api/config/preview', data: {'content': content, 'mode': mode})).data);
 
+  @override
   Future<ConfigBackup> importConfig(String content, String mode, String revision) async =>
       ConfigBackup.fromJson((await _dio.post('/api/config/import', data: {'content': content, 'mode': mode, 'revision': revision})).data);
 
+  @override
   Future<List<ConfigBackup>> listConfigBackups() async =>
       ((await _dio.get('/api/config/backups')).data as List).map((value) => ConfigBackup.fromJson(value)).toList();
 
+  @override
   Future<String> readConfigBackup(String name) async =>
       (await _dio.get('/api/config/backups/${Uri.encodeComponent(name)}')).data['content'] as String;
 
   /// 读取全局配置项（日志级别、重连默认值）。
+  @override
   Future<GlobalSettings> getGlobalSettings() async {
     final resp = await _dio.get('/api/config');
     return GlobalSettings.fromJson(resp.data);
   }
 
   /// 更新全局配置项；套用了新默认值的运行中隧道会被重启。
+  @override
   Future<void> updateGlobalSettings(GlobalSettings s) =>
       _put('/api/config', s.toJson());
 
   /// 连接 WebSocket 事件流，断线后自动重连，直到 [close] 被调用。
   ///
   /// 事件格式：{"type":"snapshot","snapshot":[...]}，以及 status / log 事件。
+  @override
   Stream<Map<String, dynamic>> events() async* {
     while (!_closed) {
       final connector = HttpClient()..connectionTimeout = _connectTimeout;
@@ -220,6 +259,7 @@ class DaemonClient {
 
   String get wsBase => info.wsBase;
 
+  @override
   void close() {
     if (_closed) return;
     _closed = true;
@@ -250,24 +290,4 @@ class DaemonClient {
   Future<void> _delete(String path) async {
     await _dio.delete(path);
   }
-}
-
-/// 从 daemon 错误响应中提取可读信息。
-String describeError(Object error) {
-  if (error is DioException) {
-    final data = error.response?.data;
-    if (data is Map && data['error'] != null) {
-      return data['error'].toString();
-    }
-    if (data is String && data.contains('error')) {
-      try {
-        final decoded = jsonDecode(data);
-        if (decoded is Map && decoded['error'] != null) {
-          return decoded['error'].toString();
-        }
-      } catch (_) {}
-    }
-    return error.message ?? error.toString();
-  }
-  return error.toString();
 }

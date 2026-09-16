@@ -5,7 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/tunnel_diagnostic.dart';
 import '../providers.dart';
-import '../services/daemon_client.dart';
+import '../services/tunnel_engine.dart';
 import '../widgets.dart';
 
 Future<void> openTunnelDiagnostics(
@@ -33,7 +33,7 @@ class TunnelDiagnosticsDialog extends ConsumerStatefulWidget {
   });
 
   final String name;
-  final DaemonClient client;
+  final TunnelEngine client;
 
   @override
   ConsumerState<TunnelDiagnosticsDialog> createState() =>

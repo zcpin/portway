@@ -6,13 +6,15 @@ import 'package:tray_manager/tray_manager.dart';
 
 import '../models.dart';
 import '../models/connection_preferences.dart';
-import 'daemon_client.dart';
 import 'tray_menu.dart';
+import 'tunnel_engine.dart';
 
 /// 系统托盘：关闭窗口时把程序收进托盘，保持后台常驻。
 ///
-/// 隧道由 daemon 维持，客户端窗口本身不需要一直开着；
-/// 收进托盘后仍可随时从托盘恢复窗口或真正退出。
+/// 收进托盘不会影响隧道，也不会关闭引擎；收进后仍可随时恢复窗口或真正退出。
+///
+/// 真正「退出程序」的后果取决于引擎形态：daemon 模式下隧道继续运行，
+/// 进程内引擎模式下引擎与界面同进程，退出即隧道停止。
 class AppTray with TrayListener {
   AppTray({
     required this.onShowWindow,
@@ -32,11 +34,11 @@ class AppTray with TrayListener {
   /// 请求退出程序。
   final VoidCallback onQuit;
 
-  final bool Function(DaemonClient client) isCurrentClient;
-  final Future<void> Function(DaemonClient client) onTunnelsChanged;
+  final bool Function(TunnelEngine client) isCurrentClient;
+  final Future<void> Function(TunnelEngine client) onTunnelsChanged;
   final Future<void> Function(Object error) onError;
   final Future<void> Function(
-    DaemonClient client,
+    TunnelEngine client,
     String name,
     ConnectionOpenAction action,
   )?
@@ -50,8 +52,8 @@ class AppTray with TrayListener {
   Future<void>? _initializing;
   Future<void> _menuQueue = Future.value();
   int _revision = 0;
-  DaemonClient? _client;
-  DaemonClient? _busyClient;
+  TunnelEngine? _client;
+  TunnelEngine? _busyClient;
   List<Tunnel>? _tunnels;
   String? _instanceLabel;
   ConnectionPreferences? _preferences;
@@ -120,7 +122,7 @@ class AppTray with TrayListener {
 
   /// Keep the current snapshot even before the native icon finishes loading.
   Future<void> updateStatus({
-    DaemonClient? client,
+    TunnelEngine? client,
     List<Tunnel>? tunnels,
     String? instanceLabel,
     ConnectionPreferences? preferences,
@@ -158,10 +160,10 @@ class AppTray with TrayListener {
     return _menuQueue;
   }
 
-  bool _current(DaemonClient client) =>
+  bool _current(TunnelEngine client) =>
       !_disposed && identical(_client, client) && isCurrentClient(client);
 
-  Future<void> _run(TrayTunnelAction action, DaemonClient client) async {
+  Future<void> _run(TrayTunnelAction action, TunnelEngine client) async {
     if (!_current(client) || identical(_busyClient, client)) return;
     _busyClient = client;
     _refreshMenu();

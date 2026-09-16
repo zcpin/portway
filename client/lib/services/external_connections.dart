@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../models/connection_preferences.dart';
-import 'daemon_client.dart';
+import 'tunnel_engine.dart';
 
 typedef ProgramOpener =
     Future<void> Function(String executable, List<String> arguments);
@@ -21,7 +21,7 @@ class ExternalConnectionLauncher {
   final Future<bool> Function(Uri) _openUrl;
   final ProgramOpener _openProgram;
   final Duration connectionTimeout;
-  final _pending = <(DaemonClient, String), Future<void>>{};
+  final _pending = <(TunnelEngine, String), Future<void>>{};
 
   static Future<void> _startProgram(
     String executable,
@@ -45,7 +45,7 @@ class ExternalConnectionLauncher {
   }
 
   Future<void> open(
-    DaemonClient client,
+    TunnelEngine client,
     String name,
     ConnectionOpenAction action, {
     required bool Function() stillCurrent,
@@ -70,7 +70,7 @@ class ExternalConnectionLauncher {
   }
 
   Future<void> _open(
-    DaemonClient client,
+    TunnelEngine client,
     String name,
     ConnectionOpenAction action, {
     required bool Function() stillCurrent,

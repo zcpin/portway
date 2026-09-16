@@ -2,29 +2,43 @@
 
 本地 SSH 隧道管理工具。把一个远端端口映射到本地，常用于安全地访问内网数据库、缓存等不对外暴露的服务。
 
-与上一版不同，本项目**不使用 WebView / Wails**：核心逻辑跑在一个无界面的 Go 守护进程里，界面是独立的 Flutter 桌面客户端（Windows / macOS / Linux 原生窗口），两者通过本机 HTTP + WebSocket 通信。
+与上一版不同，本项目**不使用 WebView / Wails**：核心逻辑在 Go 里，界面是独立的 Flutter 桌面客户端（Windows / macOS / Linux 原生窗口）。隧道引擎有两种形态，客户端默认使用**进程内引擎**：
+
+| | 进程内引擎（默认） | 独立 daemon |
+|---|---|---|
+| 形态 | Go 编译成动态库，加载进客户端进程 | 独立的无界面进程 |
+| 调用方式 | dart:ffi 直接调用 | 本机 HTTP + WebSocket |
+| 端口 / 令牌 / 发现文件 | 都不需要 | 每次启动重新生成 |
+| 客户端退出后隧道 | 随之停止 | 继续运行 |
+| 启动期握手 | 无 | 读发现文件 → 探活 → 鉴权 |
+
+选进程内引擎作为默认，是因为独立 daemon 的启动要经过「发现文件 → 端口探活 → token 鉴权」这条链，任一环节陈旧或撞上竞态都会让界面卡在「正在连接」；进程内没有这条链，冷启动不需要等待任何握手。需要「客户端退出后隧道继续跑」时，可显式切回 daemon 模式（见 [引擎形态](#引擎形态)）。
 
 ## 架构
 
 ```
-Flutter 客户端（原生窗口）  ──HTTP / WebSocket──▶  Go daemon  ──SSH──▶  远端主机
-      本地运行                    仅监听 127.0.0.1            隧道目标
+Flutter 客户端（原生窗口）
+  ├── 进程内引擎（默认） ── dart:ffi ────▶  Go 动态库（同一进程）
+  └── 独立 daemon        ── HTTP / WS ──▶  Go daemon（仅监听 127.0.0.1）
+                                                    └── SSH ──▶  远端主机
 ```
 
-这样切分的好处：
+两种形态复用同一套业务逻辑（`daemon/internal/app`），参数校验、返回结构与事件格式完全一致，因此可以随时互换：
 
 - **无 WebView 依赖**：不需要 WebView2 Runtime，也没有 alpha 版框架的风险
-- **隧道不随界面退出**：关掉客户端窗口，daemon 仍在维持隧道
 - **界面可独立演进**：换 UI 技术栈不影响隧道逻辑
+- **多进程可选**：需要隧道脱离界面常驻时，改用独立 daemon
 
 ## 目录结构
 
 ```
 ssh-tunnel/
-├── daemon/                    # Go 守护进程（无界面）
-│   ├── cmd/ssh-tunnel/        # 入口
+├── daemon/                    # Go 侧：业务逻辑 + 两种对外形态
+│   ├── cmd/ssh-tunnel/        # 独立 daemon 入口
+│   ├── cmd/libssh-tunnel/     # 进程内引擎入口（buildmode=c-shared）
 │   ├── internal/
 │   │   ├── app/               # 业务门面：隧道、配置、密钥、日志缓冲
+│   │   ├── embedded/          # 进程内引擎：包装 app，导出 FFI 符号
 │   │   ├── server/            # HTTP API 与 WebSocket Hub
 │   │   ├── config/            # 配置解析与读写
 │   │   ├── manager/           # 多隧道管理
@@ -35,8 +49,12 @@ ssh-tunnel/
 └── client/                    # Flutter 桌面客户端
     └── lib/
         ├── models.dart
-        ├── providers.dart     # 状态管理
-        ├── services/          # 服务发现与 daemon 通信
+        ├── providers.dart     # 状态管理：挑选引擎形态并建立连接
+        ├── services/
+        │   ├── tunnel_engine.dart    # 引擎接口：两种实现的共同契约
+        │   ├── embedded_engine.dart  # 进程内引擎（dart:ffi）
+        │   ├── daemon_client.dart    # 独立 daemon（HTTP + WebSocket）
+        │   └── daemon_discovery.dart # 服务发现（仅 daemon 模式）
         ├── pages/             # 隧道 / SSH 连接 / 密钥 / 日志
         └── widgets.dart
 ```
@@ -113,18 +131,77 @@ SSH_TUNNEL_DATA_DIR=/opt/ssh-tunnel-data ./ssh_tunnel_client
 
 > 系统公共服务目录下的发现文件以 `0755` / `0644` 权限写入，因为服务进程以 LocalSystem / root 运行，而客户端以普通用户身份读取。该文件包含访问令牌，因此同机其他用户也能读到它——在单用户机器上无碍，多用户机器上若不希望其他用户控制隧道，请改用用户级自启。
 
-### 2. 启动客户端
+### 2. 构建进程内引擎
+
+默认引擎是加载进客户端进程的动态库，需要先构建一次：
+
+```bash
+cd daemon
+go build -buildmode=c-shared -o bin/ssh-tunnel.dll ./cmd/libssh-tunnel
+```
+
+Windows 上 c-shared 需要 C 工具链，脚本会自动查找仓库内的
+`.tools/mingw64/bin/gcc.exe`，再回退到 PATH 里的 `gcc`：
+
+```powershell
+pwsh scripts/build_engine.ps1 -Version 1.2.3
+```
+
+macOS / Linux 分别产出 `libssh-tunnel.dylib` / `libssh-tunnel.so`，用同一个脚本即可。
+没有 C 工具链时：Windows 装 mingw-w64（winlibs / MSYS2），macOS 执行
+`xcode-select --install`，Linux 装 `build-essential`。
+
+> 没有构建动态库也可以直接用——客户端找不到库时会**自动回退到 daemon 模式**，
+> 只是拿不到单进程的启动优势。
+
+### 3. 启动客户端
 
 ```bash
 cd client
 flutter run -d windows        # 或 macos / linux
 ```
 
-客户端会自动发现并连接 daemon。若 daemon 未运行，且客户端旁带有
-`ssh-tunnel-daemon.exe`（发布版已随程序分发），客户端会**自动拉起它**并等待就绪；
-仅用 `flutter run` 调试时，会自动向上查找源码仓库里的 `daemon/bin/ssh-tunnel-daemon.exe`。
-拉起后 daemon 独立常驻：关闭或退出客户端都不影响隧道。
+客户端启动时先找动态库：`SSH_TUNNEL_EMBEDDED_LIB` 指定的路径 → 客户端可执行文件同目录
+→ 从客户端位置向上查找仓库里的 `daemon/bin/`。找到就加载进程内引擎；找不到则回退到
+发现并连接独立 daemon。
+
+daemon 模式下：若 daemon 未运行，且客户端旁带有 `ssh-tunnel-daemon.exe`（发布版已随程序分发），
+客户端会**自动拉起它**并等待就绪；仅用 `flutter run` 调试时，会自动向上查找源码仓库里的
+`daemon/bin/ssh-tunnel-daemon.exe`。拉起后 daemon 独立常驻：关闭或退出客户端都不影响隧道。
 WebSocket 连接恢复后，客户端会自动同步完整隧道列表与运行状态，包括离线期间的增删改。
+
+### 3b. 引擎形态与切换
+
+顶部横幅会显示当前用的是哪种引擎：进程内引擎显示「已就绪 · 进程内引擎」，
+daemon 显示「已连接 http://127.0.0.1:<端口> · 用户进程 / 系统服务」。
+
+两种形态的取舍：
+
+| 关心的事 | 用哪个 |
+|---|---|
+| 冷启动立刻可用、不要握手竞态 | 进程内引擎（默认） |
+| 关掉客户端窗口后隧道继续跑 | 独立 daemon |
+| 多个客户端共用一套隧道 | 独立 daemon |
+| 切换到独立部署的远端/系统服务实例 | 独立 daemon |
+
+切换方式：
+
+```bash
+# 强制使用独立 daemon（例如动态库加载失败时绕过）
+SSH_TUNNEL_ENGINE=daemon ./ssh_tunnel_client
+
+# 强制使用进程内引擎
+SSH_TUNNEL_ENGINE=embedded ./ssh_tunnel_client
+
+# 开发时直接指向构建产物
+SSH_TUNNEL_EMBEDDED_LIB=/path/to/ssh-tunnel.dll ./ssh_tunnel_client
+```
+
+不设置 `SSH_TUNNEL_ENGINE` 时：动态库存在就用进程内引擎，否则用 daemon。
+
+> 进程内引擎与界面同进程，**客户端退出即隧道停止**，也没有「系统服务」这一形态；
+> 托盘收进托盘不会停掉隧道，只有真正退出程序才会。工作区在进程内模式下映射为一份配置文件，
+> 每个工作区是一个独立实例。
 
 顶部实例菜单可以选择自动发现的 daemon，或创建独立工作区。工作区配置与发现文件放在 `~/.ssh-tunnel/workspaces/<工作区标识>/`，名称和当前选择保存在 `~/.ssh-tunnel/workspaces.json`。新工作区从空配置启动，可再从「设置」导入配置。选定实例离线时保持该选择；需要切换时可手动选择其他实例或「自动选择实例」。切换会关闭旧客户端连接并重新加载列表、密钥、日志和设置，不停止原 daemon 的隧道。
 
@@ -359,12 +436,20 @@ go build ./...
 go vet ./...
 go test ./...
 
+# 进程内引擎动态库（c-shared；需要 C 工具链）
+pwsh ../scripts/build_engine.ps1          # Windows
+# go build -buildmode=c-shared -o bin/libssh-tunnel.so ./cmd/libssh-tunnel  # Linux / macOS
+
 # client：依赖、静态检查、测试
 cd client
 flutter pub get
 dart analyze
 flutter test
 ```
+
+`client/test/embedded_engine_ffi_test.dart` 会真的加载 `daemon/bin/` 里的动态库，
+验证 Dart 声明与 Go 导出符号、句柄宽度、字符串释放方式和 `{"ok":..}` 信封格式对得上；
+动态库不存在时该文件整体跳过，因此只跑 Dart 逻辑的 CI 不会因此变红。
 
 每次 push / PR 会由 `.github/workflows/ci.yml` 执行以上检查（Go 侧含 `gofmt` 校验与 `-race` 测试），以及发布版本解析和 Release 发布逻辑的测试。脚本测试也可在仓库根目录运行：
 
@@ -391,13 +476,22 @@ scripts/build_windows.bat [版本号]
 - `ssh-tunnel-setup-<版本>.exe` —— Inno Setup 安装程序
 - `ssh-tunnel-portable-<版本>.zip` —— 便携版，解压即用
 
-步骤：`flutter build windows --release` → `go build` 并把 daemon 拷入客户端发布目录（同目录是客户端自动拉起 daemon 的前提）→ 复制示例配置 → Inno Setup 打包 → 压缩便携 zip。
+步骤：`flutter build windows --release` → 构建进程内引擎动态库并拷入客户端发布目录
+（同目录是客户端加载引擎的前提）→ `go build` daemon 并拷入同一目录（回退引擎，同时供
+`mark-portable` 使用）→ 复制示例配置 → Inno Setup 打包 → 压缩便携 zip。
 
-版本参数同时写入客户端、daemon 和安装包。本地构建默认使用构建号 `1`；CI 通过额外的 `[build-name] [build-number]` 参数传入数字版本及运行序号。缺少 Inno Setup 时只跳过安装包，仍然生成便携 ZIP。
+版本参数同时写入客户端、引擎动态库、daemon 和安装包。本地构建默认使用构建号 `1`；
+CI 通过额外的 `[build-name] [build-number]` 参数传入数字版本及运行序号。缺少 Inno Setup 时
+只跳过安装包，仍然生成便携 ZIP。
+
+引擎动态库构建失败会直接中断发布（避免悄悄发出一个退化为 daemon 模式的包）；
+确实需要跳过时设 `SKIP_ENGINE=1`。
 
 前置条件：
 
 - Flutter / Go / VS Build Tools 在 PATH
+- 构建进程内引擎需要 C 工具链：mingw-w64 的 gcc（winlibs / MSYS2），
+  或把 gcc 放到 `.tools\mingw64\bin\gcc.exe`
 - 打包安装程序需要 Inno Setup 6（未安装时脚本会跳过安装包、仍产出便携 zip）：
   `winget install JRSoftware.InnoSetup`
 
@@ -463,6 +557,8 @@ Linux 便携版需要系统提供 GTK 3、Ayatana AppIndicator（或 AppIndicato
 ## 已知限制
 
 - 同一发现位置只允许一个 daemon 实例（`daemon.json` 为单文件，后启动的会覆盖）；需要并行多实例时用 `SSH_TUNNEL_DATA_DIR` 各自指定目录
+- 进程内引擎在**同一进程内只能有一个实例**：日志级别与日志钩子是包级全局状态，多实例会互相覆盖。切换工作区时客户端会先关闭旧引擎再创建新的，因此切换瞬间隧道会短暂中断
+- 进程内引擎的**诊断**无法中途取消：关闭诊断窗口后，引擎里的检查仍会跑到超时为止（daemon 模式下会随请求一起取消）
 - 系统服务模式下发现文件需对所有本地用户可读，令牌因此对本机其他用户可见（详见「服务发现的候选位置」）
 - 私钥以明文路径记录，不做复制；daemon 以运行身份读取该文件，因此权限需对运行身份开放（系统服务模式下是 LocalSystem / root）
 - Windows 构建需要带 `PROGRAMFILES` 系列环境变量的终端环境（VS Build Tools）

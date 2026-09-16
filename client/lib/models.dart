@@ -390,6 +390,12 @@ class DaemonInfo {
   /// 是否来自系统级公共目录，即 daemon 以系统服务方式运行。
   final bool isShared;
 
+  /// 引擎是否运行在客户端进程内（编译成动态库经 FFI 调用）。
+  ///
+  /// 为真时没有端口、令牌与发现文件，[host] / [port] / [token] 都是占位值，
+  /// 界面不应把它们展示给用户。
+  final bool embedded;
+
   const DaemonInfo({
     required this.host,
     required this.port,
@@ -401,6 +407,7 @@ class DaemonInfo {
     this.serviceMode,
     this.discoveryPath = '',
     this.isShared = false,
+    this.embedded = false,
   });
 
   factory DaemonInfo.fromJson(Map<String, dynamic> j) => DaemonInfo(
@@ -427,13 +434,23 @@ class DaemonInfo {
         serviceMode: serviceMode,
         discoveryPath: path,
         isShared: serviceMode ?? shared,
+        embedded: embedded,
       );
 
   /// 运行方式的中文描述，用于界面提示。
-  String get sourceLabel => isShared ? '系统服务' : '用户进程';
+  String get sourceLabel => embedded ? '进程内引擎' : (isShared ? '系统服务' : '用户进程');
 
-  String get httpBase => Uri(scheme: 'http', host: host, port: port).toString();
-  String get wsBase => Uri(scheme: 'ws', host: host, port: port).toString();
+  /// 实例标识：切换实例时界面据此重置页面状态。
+  ///
+  /// daemon 用「发现文件路径 + token」——重启 daemon 会更换端口与 token，
+  /// 两者都变了才说明换了实例；进程内引擎没有这两个概念，
+  /// 实例由配置文件位置唯一确定。
+  String get instanceKey =>
+      embedded ? configPath : '$discoveryPath|$token';
+
+  /// 连接地址；进程内引擎没有监听端口，返回空串。
+  String get httpBase => embedded ? '' : Uri(scheme: 'http', host: host, port: port).toString();
+  String get wsBase => embedded ? '' : Uri(scheme: 'ws', host: host, port: port).toString();
 }
 
 /// daemon 的全局配置项（日志级别、重连默认值），对应 GET/PUT /api/config。

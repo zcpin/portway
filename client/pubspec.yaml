@@ -42,6 +42,10 @@ dependencies:
   local_notifier: ^0.1.6
   url_launcher: ^6.3.2
 
+  # 进程内引擎（FFI）：提供 Utf8 与 malloc 等跨平台辅助，
+  # 避免自己为每个平台拼字符串分配逻辑。
+  ffi: ^2.1.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

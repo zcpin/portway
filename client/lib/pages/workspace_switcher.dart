@@ -39,7 +39,7 @@ class _WorkspaceSwitcherState extends ConsumerState<WorkspaceSwitcher> {
     final preferences = ref.watch(workspacesProvider);
     final candidates = ref.watch(discoveryProvider).valueOrNull ?? [];
     final available = ref.watch(instanceAvailabilityProvider).valueOrNull ?? {};
-    final connected = ref.watch(daemonInfoProvider).valueOrNull;
+    final engine = ref.watch(clientProvider).valueOrNull;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
       child: preferences.when(
@@ -59,21 +59,26 @@ class _WorkspaceSwitcherState extends ConsumerState<WorkspaceSwitcher> {
             (entry) =>
                 entry.$1.isNotEmpty && DaemonDiscovery.samePath(entry.$1, path),
           );
-          bool online(String path) =>
+          // 仅按发现文件路径判断在线状态：只对 daemon 实例有意义，
+          // 进程内引擎没有发现文件，改由 engineOwnsWorkspace 判定。
+          bool onlinePath(String path) =>
               available[path] == true ||
-              (connected != null &&
-                  DaemonDiscovery.samePath(connected.discoveryPath, path));
+              (engine != null &&
+                  !engine.info.embedded &&
+                  DaemonDiscovery.samePath(engine.info.discoveryPath, path));
           for (final workspace in preferences.workspaces) {
+            final isOnline = onlinePath(workspace.discoveryPath) ||
+                (engine != null && engineOwnsWorkspace(engine, workspace));
             entries.add((
               workspace.discoveryPath,
-              '${workspace.name} · ${online(workspace.discoveryPath) ? '在线' : '未连接'}',
+              '${workspace.name} · ${isOnline ? '在线' : '未连接'}',
             ));
           }
           for (final candidate in candidates) {
             if (!known(candidate.path)) {
               entries.add((
                 candidate.path,
-                '${candidate.info.sourceLabel} · ${candidate.info.httpBase} · ${online(candidate.path) ? '在线' : '离线'}',
+                '${candidate.info.sourceLabel} · ${candidate.info.httpBase} · ${onlinePath(candidate.path) ? '在线' : '离线'}',
               ));
             }
           }

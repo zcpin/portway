@@ -8,12 +8,12 @@ import 'models.dart';
 import 'connection_preferences_provider.dart';
 import 'providers.dart';
 import 'widgets.dart';
-import 'services/daemon_client.dart';
 import 'services/daemon_discovery.dart';
 import 'services/desktop_notifications.dart';
 import 'services/recovery_alerts.dart';
 import 'services/settings_store.dart';
 import 'services/tray.dart';
+import 'services/tunnel_engine.dart';
 import 'services/updates.dart';
 import 'pages/about_page.dart';
 import 'pages/connections_page.dart';
@@ -328,7 +328,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WindowListener {
                         return const _DaemonMissing();
                       }
                       return IndexedStack(
-                        key: ValueKey('${client?.info.discoveryPath}|${client?.info.token}'),
+                        key: ValueKey(client?.info.instanceKey ?? ''),
                         index: _selected,
                         children: _pages,
                       );
@@ -350,7 +350,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WindowListener {
     final preferences = ref.read(workspacesProvider).valueOrNull;
     if (client != null && preferences != null) {
       for (final workspace in preferences.workspaces) {
-        if (DaemonDiscovery.samePath(workspace.discoveryPath, client.info.discoveryPath)) {
+        if (engineOwnsWorkspace(client, workspace)) {
           label = workspace.name;
           break;
         }
@@ -367,7 +367,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WindowListener {
     final client = connection.valueOrNull;
     final tunnels = data.valueOrNull;
     if (connection.isLoading || data.isLoading || client == null || tunnels == null) return;
-    final instance = '${client.info.discoveryPath}|${client.info.pid}|${client.info.token}';
+    final instance = '${client.info.instanceKey}|${client.info.pid}';
     for (final alert in _recoveryAlerts.update(instance, tunnels)) {
       _notifications.show(alert, onClick: _showWindow, stillRelevant: () {
         if (!mounted || !identical(ref.read(clientProvider).valueOrNull, client)) return false;
@@ -383,18 +383,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WindowListener {
 class _ConnectionBanner extends ConsumerWidget {
   const _ConnectionBanner({required this.state});
 
-  final AsyncValue<DaemonClient?> state;
+  final AsyncValue<TunnelEngine?> state;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
+
+    // 两种引擎形态的措辞不同：进程内引擎没有「连接」这一说，
+    // 启动期的等待文案必须避免让人误以为卡在握手。
+    final embedded = resolveEngineMode() == EngineMode.embedded;
 
     late final String text;
     late final Color color;
 
     state.when(
       loading: () {
-        text = '正在连接 daemon...';
+        text = embedded ? '正在启动引擎...' : '正在连接 daemon...';
         color = theme.colorScheme.tertiary;
       },
       error: (_, _) {
@@ -403,12 +407,13 @@ class _ConnectionBanner extends ConsumerWidget {
       },
       data: (client) {
         if (client == null) {
-          text = 'daemon 未运行';
+          text = embedded ? '引擎未启动' : 'daemon 未运行';
           color = theme.colorScheme.error;
         } else {
           final info = client.info;
-          text =
-              '已连接 ${info.httpBase} · ${info.sourceLabel}（版本 ${info.version}）';
+          text = info.embedded
+              ? '已就绪 · ${info.sourceLabel}（版本 ${info.version}）'
+              : '已连接 ${info.httpBase} · ${info.sourceLabel}（版本 ${info.version}）';
           color = const Color(0xFF2E9E5B);
         }
       },
@@ -426,7 +431,9 @@ class _ConnectionBanner extends ConsumerWidget {
           const Spacer(),
           TextButton.icon(
             onPressed: () {
-              // 重新读取发现文件并重新探活；其余数据状态随之级联刷新
+              // 重建引擎连接：进程内模式直接重启引擎，daemon 模式重新读取
+              // 发现文件并重新探活。其余数据状态随之级联刷新。
+              ref.invalidate(clientProvider);
               ref.invalidate(discoveryProvider);
               ref.invalidate(tunnelsProvider);
               ref.invalidate(sshConnectionsProvider);
@@ -452,6 +459,8 @@ class _DaemonMissing extends ConsumerWidget {
     final theme = Theme.of(context);
     final found =
         ref.watch(discoveryProvider).valueOrNull ?? const <DaemonCandidate>[];
+    // 失败原因与补救手段随引擎形态不同：进程内引擎缺的是动态库，不是 daemon 进程。
+    final embedded = resolveEngineMode() == EngineMode.embedded;
 
     return Center(
       child: Padding(
@@ -468,19 +477,27 @@ class _DaemonMissing extends ConsumerWidget {
                     Icon(Icons.power_off,
                         color: theme.colorScheme.error, size: 28),
                     const SizedBox(width: 12),
-                    Text('当前实例未连接',
+                    Text(embedded ? '引擎未能启动' : '当前实例未连接',
                         style: theme.textTheme.titleLarge),
                   ],
                 ),
                 const SizedBox(height: 16),
-                const Text(
-                    '客户端会在启动时自动拉起随程序分发的 daemon。'
-                    '若自动启动失败，也可手动启动本地守护进程：'),
+                Text(
+                  embedded
+                      ? '进程内引擎由随程序分发的动态库提供，加载失败时客户端会回退到独立 daemon 模式。'
+                        '可先编译引擎动态库，或临时用环境变量强制使用 daemon：'
+                      : '客户端会在启动时自动拉起随程序分发的 daemon。'
+                        '若自动启动失败，也可手动启动本地守护进程：',
+                ),
                 const SizedBox(height: 12),
-                const _CodeBlock(
-                  'cd daemon\n'
-                  'go build -o bin/ssh-tunnel-daemon.exe ./cmd/ssh-tunnel\n'
-                  'bin/ssh-tunnel-daemon.exe -config ssh-tunnel.toml',
+                _CodeBlock(
+                  embedded
+                      ? 'cd daemon\n'
+                        'go build -buildmode=c-shared -o bin/ssh-tunnel.dll ./cmd/libssh-tunnel\n'
+                        '# 或强制回退：set SSH_TUNNEL_ENGINE=daemon'
+                      : 'cd daemon\n'
+                        'go build -o bin/ssh-tunnel-daemon.exe ./cmd/ssh-tunnel\n'
+                        'bin/ssh-tunnel-daemon.exe -config ssh-tunnel.toml',
                 ),
                 const SizedBox(height: 16),
                 FilledButton.icon(
@@ -495,20 +512,23 @@ class _DaemonMissing extends ConsumerWidget {
                   icon: const Icon(Icons.play_arrow),
                   label: const Text('重新检测 / 启动工作区'),
                 ),
-                const SizedBox(height: 16),
-                Text('客户端会依次检查以下位置（按优先级）：',
-                    style: theme.textTheme.bodySmall),
-                const SizedBox(height: 6),
-                for (final path in DaemonDiscovery.candidatePaths)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 2),
-                    child: Text(
-                      '· $path',
-                      style: theme.textTheme.bodySmall
-                          ?.copyWith(fontFamily: 'monospace'),
+                // 候选位置与发现文件是 daemon 模式的概念，进程内引擎没有这一层。
+                if (!embedded) ...[
+                  const SizedBox(height: 16),
+                  Text('客户端会依次检查以下位置（按优先级）：',
+                      style: theme.textTheme.bodySmall),
+                  const SizedBox(height: 6),
+                  for (final path in DaemonDiscovery.candidatePaths)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 2),
+                      child: Text(
+                        '· $path',
+                        style: theme.textTheme.bodySmall
+                            ?.copyWith(fontFamily: 'monospace'),
+                      ),
                     ),
-                  ),
-                if (found.isNotEmpty) ...[
+                ],
+                if (!embedded && found.isNotEmpty) ...[
                   const SizedBox(height: 12),
                   Text(
                     '已找到 ${found.length} 个发现文件：'

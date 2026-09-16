@@ -7,7 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models.dart';
 import '../providers.dart';
-import '../services/daemon_client.dart';
+import '../services/tunnel_engine.dart';
 import '../widgets.dart';
 
 class ConfigTransferPanel extends ConsumerStatefulWidget {
@@ -33,7 +33,7 @@ class _ConfigTransferPanelState extends ConsumerState<ConfigTransferPanel> {
     super.dispose();
   }
 
-  Future<void> _run(Future<void> Function(DaemonClient) action) async {
+  Future<void> _run(Future<void> Function(TunnelEngine) action) async {
     if (_busy) return;
     setState(() => _busy = true);
     try {

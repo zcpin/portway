@@ -1,11 +1,15 @@
 import 'dart:async';
+import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'models.dart';
 import 'services/daemon_client.dart';
 import 'services/daemon_discovery.dart';
 import 'services/daemon_launcher.dart';
+import 'services/embedded_engine.dart';
+import 'services/tunnel_engine.dart';
 import 'services/workspaces.dart';
 
 /// riverpod 3 移除了 AsyncValue.valueOrNull，这里补一个等价实现，
@@ -62,20 +66,97 @@ final instanceAvailabilityProvider = FutureProvider<Map<String, bool>>((ref) asy
   return Map.fromEntries(results);
 });
 
-/// 已连通的 daemon 客户端；daemon 未运行时为 null。
+/// 已连通的引擎；不可用时为 null。
 ///
-/// 候选位置按优先级逐个探活并鉴权，取第一个 token 有效的：
-/// 陈旧文件指向的端口无响应或 token 已过期时会被跳过，
-/// 从而不会挡住后面真正在运行的那个 daemon。
+/// 有两种引擎形态，优先使用进程内引擎：
 ///
-/// 如果没有任何候选可用，会尝试自动拉起随客户端打包的本地 daemon
-/// （见 [DaemonLauncher]），成功后重新发现并连接——打开客户端即用，
-/// 无需用户手动分两步启动。
+///   1. **进程内（FFI）**：引擎编译成动态库随客户端分发，加载进客户端进程。
+///      没有端口、令牌与服务发现文件，因此不存在「发现文件陈旧 / 端口无人监听」
+///      这类启动期竞态，冷启动不需要等待任何握手。
+///   2. **独立 daemon**：候选位置按优先级逐个探活并鉴权，取第一个 token 有效的；
+///      都没有时自动拉起随客户端打包的 daemon（见 [DaemonLauncher]）。
 ///
-/// 连接成功后定期探活：daemon 重启会更换端口与 token，旧客户端的所有
-/// 认证请求都会失败，此时自动重新发现并重建客户端。
-/// 未连接时定期重试，daemon 稍后启动即可自动连上。
-final clientProvider = FutureProvider<DaemonClient?>((ref) async {
+/// 动态库不存在或加载失败时会回退到 daemon 模式，这样 `flutter run` 等开发场景
+/// 不必先编译引擎库。可用 `SSH_TUNNEL_ENGINE=daemon` 强制使用 daemon。
+///
+/// daemon 模式连接成功后定期探活：daemon 重启会更换端口与 token，旧客户端的所有
+/// 认证请求都会失败，此时自动重新发现并重建客户端；未连接时定期重试。
+final clientProvider = FutureProvider<TunnelEngine?>((ref) async {
+  if (resolveEngineMode() == EngineMode.embedded) {
+    final embedded = await _startEmbedded(ref);
+    if (embedded != null) return embedded;
+  }
+  return _startDaemon(ref);
+});
+
+/// 引擎形态。
+enum EngineMode { embedded, daemon }
+
+/// 解析应当使用的引擎形态。
+///
+/// 默认在动态库可用时走进程内引擎；`SSH_TUNNEL_ENGINE=daemon` 可强制回退，
+/// 便于对比两种模式或在动态库异常时绕过。
+EngineMode resolveEngineMode() {
+  final forced = Platform.environment['SSH_TUNNEL_ENGINE']?.trim().toLowerCase();
+  if (forced == 'daemon') return EngineMode.daemon;
+  if (forced == 'embedded') return EngineMode.embedded;
+  return EmbeddedEngine.isAvailable ? EngineMode.embedded : EngineMode.daemon;
+}
+
+/// 启动进程内引擎；失败时返回 null，由调用方回退到 daemon。
+///
+/// 工作区在这里直接映射为一份配置文件：进程内引擎没有发现文件，
+/// 因此只有工作区（带独立 dataDir）能作为「实例」切换，
+/// 选中的若是 daemon 实例则退回引擎自己的默认配置查找。
+Future<TunnelEngine?> _startEmbedded(Ref ref) async {
+  final preferences = await ref.watch(workspacesProvider.future);
+
+  Workspace? workspace;
+  for (final candidate in preferences.workspaces) {
+    if (DaemonDiscovery.samePath(candidate.discoveryPath, preferences.selectedPath)) {
+      workspace = candidate;
+      break;
+    }
+  }
+
+  EmbeddedEngine? engine;
+  var disposed = false;
+  ref.onDispose(() {
+    disposed = true;
+    engine?.close();
+  });
+
+  try {
+    engine = await EmbeddedEngine.launch(configPath: workspace?.configPath);
+  } catch (error) {
+    debugPrint('进程内引擎启动失败，回退到 daemon 模式: $error');
+    return null;
+  }
+  if (disposed) {
+    engine.close();
+    return null;
+  }
+  return engine;
+}
+
+/// 当前引擎是否就是某个工作区对应的实例。
+///
+/// 两种模式的实例标识不同：
+///
+///   - 进程内引擎没有发现文件，实例由工作区的**配置文件位置**唯一确定，
+///     这也是 [_startEmbedded] 把工作区映射成 `configPath` 的逆运算；
+///   - daemon 模式仍以**发现文件路径**为准。
+///
+/// 界面据此显示工作区名与在线状态，否则进程内模式下所有工作区都会显示「未连接」。
+bool engineOwnsWorkspace(TunnelEngine engine, Workspace workspace) {
+  final info = engine.info;
+  return info.embedded
+      ? DaemonDiscovery.samePath(workspace.configPath, info.configPath)
+      : DaemonDiscovery.samePath(workspace.discoveryPath, info.discoveryPath);
+}
+
+/// 发现并连接独立 daemon；无可用的 daemon 时尝试拉起随客户端分发的可执行文件。
+Future<TunnelEngine?> _startDaemon(Ref ref) async {
   var disposed = false;
   DaemonClient? found;
   Timer? timer;
@@ -126,7 +207,7 @@ final clientProvider = FutureProvider<DaemonClient?>((ref) async {
     } finally { checking = false; }
   });
   return client;
-});
+}
 
 /// 按优先级逐个探活候选位置，返回第一个通过鉴权的客户端；都不可用时返回 null。
 Future<DaemonClient?> _probeCandidates(List<DaemonCandidate> candidates, {bool Function()? active}) async {
@@ -155,7 +236,7 @@ const _healthCheckInterval = Duration(seconds: 5);
 /// 未发现 daemon 时的重新发现间隔。
 const _rediscoveryInterval = Duration(seconds: 3);
 
-bool _clientIsCurrent(Ref ref, DaemonClient client) =>
+bool _clientIsCurrent(Ref ref, TunnelEngine client) =>
     ref.mounted && identical(ref.read(clientProvider).valueOrNull, client);
 
 /// 当前连接的 daemon 信息；未连接时为 null。
@@ -227,7 +308,7 @@ class TunnelsNotifier extends AsyncNotifier<List<Tunnel>> {
     return _loadTunnels(client);
   }
 
-  Future<List<Tunnel>> _loadTunnels(DaemonClient client) async {
+  Future<List<Tunnel>> _loadTunnels(TunnelEngine client) async {
     final revision = _pushRevision;
     try {
       final tunnels = await client.getTunnels();
@@ -276,7 +357,7 @@ class TunnelsNotifier extends AsyncNotifier<List<Tunnel>> {
   ///
   /// 失败时把异常抛给调用方（由页面用 SnackBar 提示），不改动列表状态：
   /// 一次操作失败（如端口被占用）不应该让整个隧道列表变成错误页。
-  Future<void> _act(Future<void> Function(DaemonClient) action) async {
+  Future<void> _act(Future<void> Function(TunnelEngine) action) async {
     final client = await ref.read(clientProvider.future);
     if (client == null) {
       throw StateError('未连接到 daemon');

@@ -5,6 +5,9 @@ client/build/
 client/.dart_tool/
 dist/
 
+# 本地 C 工具链（c-shared 构建用，按需下载，不入库）
+.tools/
+
 # 本地配置与运行时文件
 daemon/keys/
 daemon/*.toml
