@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/byteporter/ssh-tunnel/internal/logger"
+	"github.com/byteporter/portway/internal/logger"
 )
 
 type detector struct {

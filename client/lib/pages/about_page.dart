@@ -5,7 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers.dart';
 
 /// GitHub 仓库地址。占位：发布后替换为真实地址。
-const String kRepoUrl = 'https://github.com/your-name/ssh-tunnel';
+const String kRepoUrl = 'https://github.com/zcpin/portway';
 
 /// 左侧导航「关于」页。
 class AboutPage extends ConsumerWidget {
@@ -35,13 +35,20 @@ class AboutPage extends ConsumerWidget {
                     children: [
                       Row(
                         children: [
-                          Icon(Icons.swap_horiz,
-                              size: 40, color: theme.colorScheme.primary),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: Image.asset(
+                              'assets/app_icon.png',
+                              width: 40,
+                              height: 40,
+                              filterQuality: FilterQuality.medium,
+                            ),
+                          ),
                           const SizedBox(width: 16),
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text('SSH 隧道管理器',
+                              Text('端口通',
                                   style: theme.textTheme.titleLarge),
                               const SizedBox(height: 2),
                               Text(
@@ -56,9 +63,9 @@ class AboutPage extends ConsumerWidget {
                       ),
                       const SizedBox(height: 16),
                       Text(
-                        '把远端主机的端口映射到本机，安全访问不对外暴露的内网服务'
-                        '（数据库、缓存等）。隧道由本地 Go 守护进程维持，'
-                        '客户端提供直观的界面进行管理。',
+                        '本地端口转发管理工具：SSH 隧道把远端端口映射到本机，'
+                        'FRP 客户端把本地服务通过 frps 暴露出去。'
+                        '核心逻辑在 Go 引擎里，客户端提供直观的界面进行管理。',
                         style: theme.textTheme.bodyMedium,
                       ),
                     ],

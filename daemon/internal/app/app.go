@@ -13,10 +13,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/byteporter/ssh-tunnel/internal/config"
-	"github.com/byteporter/ssh-tunnel/internal/logger"
-	"github.com/byteporter/ssh-tunnel/internal/manager"
-	"github.com/byteporter/ssh-tunnel/internal/tunnel"
+	"github.com/byteporter/portway/internal/config"
+	"github.com/byteporter/portway/internal/frp"
+	"github.com/byteporter/portway/internal/logger"
+	"github.com/byteporter/portway/internal/manager"
+	"github.com/byteporter/portway/internal/tunnel"
 )
 
 const logBufferSize = 500
@@ -78,10 +79,12 @@ type EventEmitter interface {
 // App 是业务层门面。
 type App struct {
 	mgr        *manager.Manager
+	frp        *frp.Manager
 	configPath string
 	logBuffer  []LogEntry
 	logMu      sync.RWMutex
 	statusMu   sync.Mutex // 快照与状态事件按生成顺序入队。
+	frpMu      sync.Mutex // FRP 列表与状态事件按生成顺序入队。
 	emitMu     sync.RWMutex
 	emitter    EventEmitter
 	stopOnce   sync.Once
@@ -111,6 +114,15 @@ func New(configPath string) (*App, error) {
 		stopChan:   make(chan struct{}),
 	}
 
+	// FRP 客户端与 SSH 隧道完全独立：它的目录建不出来（例如权限问题）时
+	// 只关闭 FRP 功能并记录下来，不能让整个引擎起不来。
+	frpManager, err := frp.NewManager(frpConfigDir(configPath))
+	if err != nil {
+		logger.Error("初始化 FRP 支持失败，FRP 功能将不可用: %v", err)
+	} else {
+		a.frp = frpManager
+	}
+
 	logger.SetGlobalLogHook(func(level, message string) {
 		a.appendLog(level, message, extractTunnelName(message))
 	})
@@ -132,15 +144,28 @@ func (a *App) getEmitter() EventEmitter {
 	return a.emitter
 }
 
-// Start 启动所有隧道并开启状态广播。
+// Start 启动所有隧道与 FRP 客户端，并开启状态广播。
 func (a *App) Start() error {
 	go a.broadcastStatus()
-	return a.mgr.Start()
+	go a.broadcastFrp()
+
+	// 两者互不影响：隧道配置写坏不该连带让 FRP 客户端也起不来，
+	// 因此先各自启动，再把隧道的错误返回给调用方。
+	startErr := a.mgr.Start()
+	if a.frp != nil {
+		if err := a.frp.Start(); err != nil {
+			logger.Error("部分 FRP 客户端启动失败: %v", err)
+		}
+	}
+	return startErr
 }
 
-// Stop 停止所有隧道。
+// Stop 停止所有隧道与 FRP 客户端。
 func (a *App) Stop() {
 	a.stopOnce.Do(func() {
+		if a.frp != nil {
+			a.frp.Stop()
+		}
 		a.mgr.Stop()
 		close(a.stopChan)
 	})
@@ -493,7 +518,6 @@ func (a *App) SendSnapshot(target EventEmitter) {
 		return
 	}
 	a.statusMu.Lock()
-	defer a.statusMu.Unlock()
 	tunnels := a.GetTunnels()
 	status := make(map[string]tunnel.RuntimeStatus, len(tunnels))
 	for _, entry := range tunnels {
@@ -501,6 +525,13 @@ func (a *App) SendSnapshot(target EventEmitter) {
 	}
 	target.Emit("snapshot", tunnels)
 	emitRuntime(target, status)
+	a.statusMu.Unlock()
+
+	a.frpMu.Lock()
+	if a.frp != nil {
+		target.Emit("frp_snapshot", a.frp.List())
+	}
+	a.frpMu.Unlock()
 }
 
 func emitRuntime(target EventEmitter, runtime map[string]tunnel.RuntimeStatus) {

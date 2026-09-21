@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/byteporter/ssh-tunnel/internal/logger"
+	"github.com/byteporter/portway/internal/logger"
 )
 
 // startLocked creates a new run generation. Its caller must launch run exactly

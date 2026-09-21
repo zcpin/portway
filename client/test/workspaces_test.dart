@@ -5,13 +5,13 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ssh_tunnel_client/models.dart';
-import 'package:ssh_tunnel_client/pages/workspace_switcher.dart';
-import 'package:ssh_tunnel_client/providers.dart';
-import 'package:ssh_tunnel_client/services/daemon_client.dart';
-import 'package:ssh_tunnel_client/services/daemon_discovery.dart';
-import 'package:ssh_tunnel_client/services/tunnel_engine.dart';
-import 'package:ssh_tunnel_client/services/workspaces.dart';
+import 'package:portway/models.dart';
+import 'package:portway/pages/workspace_switcher.dart';
+import 'package:portway/providers.dart';
+import 'package:portway/services/daemon_client.dart';
+import 'package:portway/services/daemon_discovery.dart';
+import 'package:portway/services/tunnel_engine.dart';
+import 'package:portway/services/workspaces.dart';
 
 class _Preferences extends WorkspacesNotifier {
   _Preferences(this.initial);

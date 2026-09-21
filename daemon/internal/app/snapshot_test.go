@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/byteporter/ssh-tunnel/internal/config"
+	"github.com/byteporter/portway/internal/config"
 )
 
 type eventEmitterFunc func(string, interface{})

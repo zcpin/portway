@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'models.dart';
+import 'models/frp.dart';
 import 'connection_preferences_provider.dart';
 import 'providers.dart';
 import 'widgets.dart';
@@ -17,6 +18,7 @@ import 'services/tunnel_engine.dart';
 import 'services/updates.dart';
 import 'pages/about_page.dart';
 import 'pages/connections_page.dart';
+import 'pages/frp_page.dart';
 import 'pages/keys_page.dart';
 import 'pages/logs_page.dart';
 import 'pages/settings_page.dart';
@@ -46,7 +48,7 @@ void main() async {
     size: Size(1180, 760),
     minimumSize: Size(960, 640),
     center: true,
-    title: 'SSH 隧道管理器',
+    title: '端口通',
   );
 
   await windowManager.waitUntilReadyToShow(windowOptions, () async {
@@ -67,7 +69,7 @@ class SshTunnelApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'SSH 隧道管理器',
+      title: '端口通',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
@@ -105,6 +107,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WindowListener {
   static const _destinations = [
     (icon: Icons.swap_horiz_outlined, label: '隧道'),
     (icon: Icons.dns_outlined, label: 'SSH 连接'),
+    (icon: Icons.cloud_outlined, label: 'FRP'),
     (icon: Icons.key_outlined, label: '密钥'),
     (icon: Icons.terminal_outlined, label: '日志'),
     (icon: Icons.settings_outlined, label: '设置'),
@@ -112,12 +115,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WindowListener {
   ];
 
   /// 「设置」页在导航中的下标；其后的页面（设置、关于）不依赖 daemon，断开时也能访问。
-  static const _settingsIndex = 4;
+  static const _settingsIndex = 5;
 
   /// 导航对应的页面。设置 / 关于无需连接 daemon 即可渲染。
   List<Widget> get _pages => [
     TunnelsPage(active: _selected == 0),
     const ConnectionsPage(),
+    const FrpPage(),
     const KeysPage(),
     const LogsPage(),
     SettingsPage(onQuitForUpdate: _quit),
@@ -274,6 +278,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WindowListener {
               ref
                   .read(logsProvider.notifier)
                   .add(LogEntry.fromJson(log.cast<String, dynamic>()));
+            }
+          case 'frp_snapshot':
+            final snapshot = event['frp_snapshot'];
+            if (snapshot is List) {
+              ref.read(frpClientsProvider.notifier).applySnapshot([
+                for (final row in snapshot)
+                  FrpClient.fromJson((row as Map).cast<String, dynamic>()),
+              ]);
             }
         }
       });
@@ -493,11 +505,11 @@ class _DaemonMissing extends ConsumerWidget {
                 _CodeBlock(
                   embedded
                       ? 'cd daemon\n'
-                        'go build -buildmode=c-shared -o bin/ssh-tunnel.dll ./cmd/libssh-tunnel\n'
+                        'go build -buildmode=c-shared -o bin/portway.dll ./cmd/portway-engine\n'
                         '# 或强制回退：set SSH_TUNNEL_ENGINE=daemon'
                       : 'cd daemon\n'
-                        'go build -o bin/ssh-tunnel-daemon.exe ./cmd/ssh-tunnel\n'
-                        'bin/ssh-tunnel-daemon.exe -config ssh-tunnel.toml',
+                        'go build -o bin/portway-daemon.exe ./cmd/portway-daemon\n'
+                        'bin/portway-daemon.exe -config ssh-tunnel.toml',
                 ),
                 const SizedBox(height: 16),
                 FilledButton.icon(

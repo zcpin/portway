@@ -4,7 +4,7 @@ import (
 	"runtime"
 	"unsafe"
 
-	"github.com/byteporter/ssh-tunnel/internal/logger"
+	"github.com/byteporter/portway/internal/logger"
 	"golang.org/x/sys/windows"
 )
 

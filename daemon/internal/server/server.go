@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/byteporter/ssh-tunnel/internal/app"
-	"github.com/byteporter/ssh-tunnel/internal/logger"
+	"github.com/byteporter/portway/internal/app"
+	"github.com/byteporter/portway/internal/logger"
 )
 
 // Server 对外提供 REST 接口与 WebSocket 事件流。
@@ -126,6 +126,18 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("GET /api/keys/stat", s.auth(http.HandlerFunc(s.handleStatKey)))
 	mux.Handle("POST /api/keys/unlock", s.auth(http.HandlerFunc(s.handleUnlockKey)))
 	mux.Handle("POST /api/keys/lock", s.auth(http.HandlerFunc(s.handleLockKey)))
+
+	mux.Handle("GET /api/frp/clients", s.auth(http.HandlerFunc(s.handleListFrpClients)))
+	mux.Handle("POST /api/frp/clients", s.auth(http.HandlerFunc(s.handleCreateFrpClient)))
+	mux.Handle("PUT /api/frp/clients/{name}", s.auth(http.HandlerFunc(s.handleUpdateFrpClient)))
+	mux.Handle("DELETE /api/frp/clients/{name}", s.auth(http.HandlerFunc(s.handleDeleteFrpClient)))
+	mux.Handle("POST /api/frp/clients/{name}/start", s.auth(http.HandlerFunc(s.handleStartFrpClient)))
+	mux.Handle("POST /api/frp/clients/{name}/stop", s.auth(http.HandlerFunc(s.handleStopFrpClient)))
+	mux.Handle("POST /api/frp/clients/{name}/restart", s.auth(http.HandlerFunc(s.handleRestartFrpClient)))
+	mux.Handle("POST /api/frp/clients/{name}/proxies", s.auth(http.HandlerFunc(s.handleCreateFrpProxy)))
+	mux.Handle("PUT /api/frp/clients/{name}/proxies/{proxy}", s.auth(http.HandlerFunc(s.handleUpdateFrpProxy)))
+	mux.Handle("DELETE /api/frp/clients/{name}/proxies/{proxy}", s.auth(http.HandlerFunc(s.handleDeleteFrpProxy)))
+	mux.Handle("POST /api/frp/clients/{name}/proxies/{proxy}/toggle", s.auth(http.HandlerFunc(s.handleToggleFrpProxy)))
 
 	mux.Handle("GET /api/logs", s.auth(http.HandlerFunc(s.handleLogs)))
 	mux.Handle("POST /api/reload", s.auth(http.HandlerFunc(s.handleReload)))

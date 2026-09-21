@@ -10,7 +10,7 @@ import (
 )
 
 // label 是 launchd 用来标识任务的唯一标签。
-const label = "com.byteporter.ssh-tunnel"
+const label = "com.byteporter.portway"
 
 func plistPath() (string, error) {
 	home, err := os.UserHomeDir()

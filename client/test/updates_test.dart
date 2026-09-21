@@ -5,10 +5,10 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ssh_tunnel_client/pages/update_panel.dart';
-import 'package:ssh_tunnel_client/providers.dart';
-import 'package:ssh_tunnel_client/services/updates.dart';
-import 'package:ssh_tunnel_client/services/workspaces.dart';
+import 'package:portway/pages/update_panel.dart';
+import 'package:portway/providers.dart';
+import 'package:portway/services/updates.dart';
+import 'package:portway/services/workspaces.dart';
 
 class _Workspaces extends WorkspacesNotifier {
   @override

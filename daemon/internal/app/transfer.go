@@ -1,6 +1,6 @@
 package app
 
-import "github.com/byteporter/ssh-tunnel/internal/config"
+import "github.com/byteporter/portway/internal/config"
 
 func (a *App) ExportConfig() (config.ConfigExport, error) { return a.mgr.ExportConfig() }
 func (a *App) PreviewImport(input config.ImportRequest) (config.ImportPreview, error) {

@@ -1,7 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ssh_tunnel_client/services/settings_store.dart';
+import 'package:portway/services/settings_store.dart';
 
 void main() {
   late Directory tempDir;

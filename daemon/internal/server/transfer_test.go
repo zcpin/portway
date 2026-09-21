@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/byteporter/ssh-tunnel/internal/config"
+	"github.com/byteporter/portway/internal/config"
 )
 
 func TestConfigTransferEndpointsRequireAuthentication(t *testing.T) {

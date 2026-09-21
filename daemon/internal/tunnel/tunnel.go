@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/byteporter/ssh-tunnel/internal/config"
-	"github.com/byteporter/ssh-tunnel/internal/logger"
+	"github.com/byteporter/portway/internal/config"
+	"github.com/byteporter/portway/internal/logger"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 )

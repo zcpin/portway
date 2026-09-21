@@ -3,10 +3,10 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tray_manager/tray_manager.dart';
-import 'package:ssh_tunnel_client/models.dart';
-import 'package:ssh_tunnel_client/services/daemon_client.dart';
-import 'package:ssh_tunnel_client/services/tray.dart';
-import 'package:ssh_tunnel_client/services/tray_menu.dart';
+import 'package:portway/models.dart';
+import 'package:portway/services/daemon_client.dart';
+import 'package:portway/services/tray.dart';
+import 'package:portway/services/tray_menu.dart';
 
 Iterable<MenuItem> _items(Menu menu) sync* {
   for (final item in menu.items ?? <MenuItem>[]) {

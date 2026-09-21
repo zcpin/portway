@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/byteporter/ssh-tunnel/internal/app"
+	"github.com/byteporter/portway/internal/app"
 )
 
 func TestBatchOperationsReportPartialResultsAndAreIdempotent(t *testing.T) {

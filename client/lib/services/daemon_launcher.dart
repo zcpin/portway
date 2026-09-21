@@ -29,7 +29,7 @@ class DaemonLauncher {
 
   /// daemon 可执行文件名。
   static final String _exeName =
-      Platform.isWindows ? 'ssh-tunnel-daemon.exe' : 'ssh-tunnel-daemon';
+      Platform.isWindows ? 'portway-daemon.exe' : 'portway-daemon';
 
   /// 本会话内是否已经发起过拉起，避免创建重复进程。
   static final _launches = <String, Future<bool>>{};

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/byteporter/ssh-tunnel/internal/app"
+	"github.com/byteporter/portway/internal/app"
 )
 
 // newTestServer 用一份空配置启动只挂了路由的测试服务器。

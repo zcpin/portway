@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/byteporter/ssh-tunnel/internal/discovery"
+	"github.com/byteporter/portway/internal/discovery"
 )
 
 // The test binary doubles as a small desktop process and HTTP daemon fixture. Every

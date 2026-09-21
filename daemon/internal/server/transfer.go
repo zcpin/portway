@@ -4,7 +4,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/byteporter/ssh-tunnel/internal/config"
+	"github.com/byteporter/portway/internal/config"
 )
 
 func (s *Server) handleExportConfig(w http.ResponseWriter, r *http.Request) {

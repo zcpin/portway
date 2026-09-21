@@ -53,10 +53,10 @@ var
   CommandLine: String;
 begin
   if RegQueryStringValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run',
-      'ssh-tunnel-daemon', CommandLine) then begin
+      'portway-daemon', CommandLine) then begin
     if StartupCommandTargetsExecutable(CommandLine, InstalledExe) then begin
       if RegDeleteValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run',
-          'ssh-tunnel-daemon') then
+          'portway-daemon') then
         Log('Removed autostart entry for this installation')
       else
         Log('Unable to remove autostart entry for this installation');

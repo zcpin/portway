@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 
 import '../models.dart';
+import '../models/frp.dart';
 import '../models/tunnel_diagnostic.dart';
 import 'tunnel_engine.dart';
 
@@ -257,8 +258,60 @@ class DaemonClient implements TunnelEngine {
     }
   }
 
-  String get wsBase => info.wsBase;
+  // ---------- FRP ----------
 
+  @override
+  Future<List<FrpClient>> getFrpClients() async {
+    final resp = await _dio.get('/api/frp/clients');
+    return (resp.data as List).map((e) => FrpClient.fromJson(e)).toList();
+  }
+
+  @override
+  Future<void> addFrpClient(FrpClientPayload client) =>
+      _post('/api/frp/clients', client.toJson());
+
+  @override
+  Future<void> updateFrpClient(String name, FrpClientPayload client) =>
+      _put('/api/frp/clients/${Uri.encodeComponent(name)}', client.toJson());
+
+  @override
+  Future<void> deleteFrpClient(String name) =>
+      _delete('/api/frp/clients/${Uri.encodeComponent(name)}');
+
+  @override
+  Future<void> startFrpClient(String name) =>
+      _post('/api/frp/clients/${Uri.encodeComponent(name)}/start', null);
+
+  @override
+  Future<void> stopFrpClient(String name) =>
+      _post('/api/frp/clients/${Uri.encodeComponent(name)}/stop', null);
+
+  @override
+  Future<void> restartFrpClient(String name) =>
+      _post('/api/frp/clients/${Uri.encodeComponent(name)}/restart', null);
+
+  @override
+  Future<void> addFrpProxy(String client, FrpProxyPayload proxy) =>
+      _post('/api/frp/clients/${Uri.encodeComponent(client)}/proxies', proxy.toJson());
+
+  @override
+  Future<void> updateFrpProxy(String client, String proxy, FrpProxyPayload payload) => _put(
+        '/api/frp/clients/${Uri.encodeComponent(client)}/proxies/${Uri.encodeComponent(proxy)}',
+        payload.toJson(),
+      );
+
+  @override
+  Future<void> deleteFrpProxy(String client, String proxy) => _delete(
+        '/api/frp/clients/${Uri.encodeComponent(client)}/proxies/${Uri.encodeComponent(proxy)}',
+      );
+
+  @override
+  Future<void> toggleFrpProxy(String client, String proxy, bool enabled) => _post(
+        '/api/frp/clients/${Uri.encodeComponent(client)}/proxies/${Uri.encodeComponent(proxy)}/toggle',
+        {'enabled': enabled},
+      );
+
+  String get wsBase => info.wsBase;
   @override
   void close() {
     if (_closed) return;

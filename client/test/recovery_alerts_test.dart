@@ -2,10 +2,10 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ssh_tunnel_client/models.dart';
-import 'package:ssh_tunnel_client/services/desktop_notifications.dart';
-import 'package:ssh_tunnel_client/services/recovery_alerts.dart';
-import 'package:ssh_tunnel_client/services/tray_menu.dart';
+import 'package:portway/models.dart';
+import 'package:portway/services/desktop_notifications.dart';
+import 'package:portway/services/recovery_alerts.dart';
+import 'package:portway/services/tray_menu.dart';
 
 Tunnel _state(String state, int retries, {bool desired = true}) =>
     Tunnel.fromJson({

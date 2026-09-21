@@ -14,11 +14,11 @@ import (
 
 	"github.com/kardianos/service"
 
-	"github.com/byteporter/ssh-tunnel/internal/daemon"
+	"github.com/byteporter/portway/internal/daemon"
 )
 
 // Name 是服务在各平台服务管理器中登记的名称。
-const Name = "ssh-tunnel-daemon"
+const Name = "portway-daemon"
 
 // Options 是服务安装与运行所需的参数。
 type Options struct {
@@ -49,8 +49,8 @@ func New(opts Options) (service.Service, error) {
 
 	svcCfg := &service.Config{
 		Name:        Name,
-		DisplayName: "SSH Tunnel Daemon",
-		Description: "本地 SSH 隧道管理守护进程，为桌面客户端提供隧道控制接口。",
+		DisplayName: "Portway Daemon",
+		Description: "端口通守护进程，为桌面客户端提供 SSH 隧道与 FRP 控制接口。",
 		Arguments:   runArgs(cfgPath, opts),
 	}
 
@@ -125,5 +125,5 @@ func LogPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "ssh-tunnel", "service.log"), nil
+	return filepath.Join(dir, "portway", "service.log"), nil
 }

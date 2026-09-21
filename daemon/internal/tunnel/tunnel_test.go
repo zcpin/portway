@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/byteporter/ssh-tunnel/internal/config"
+	"github.com/byteporter/portway/internal/config"
 )
 
 // TestStartStopConcurrent 并发地 Start/Stop，验证不会出现

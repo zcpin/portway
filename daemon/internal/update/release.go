@@ -96,7 +96,7 @@ func (c *ReleaseClient) get(ctx context.Context, address string) (*http.Response
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "ssh-tunnel-updater")
+	req.Header.Set("User-Agent", "portway-updater")
 	if req.URL.Hostname() == "api.github.com" {
 		req.Header.Set("Accept", "application/vnd.github+json")
 		req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
@@ -177,11 +177,11 @@ func (c *ReleaseClient) Check(ctx context.Context, current, channel string) (Che
 func (c *ReleaseClient) assetNames(tag string) (portable, installer, checksum string) {
 	switch {
 	case c.OS == "windows" && c.Arch == "amd64":
-		return "ssh-tunnel-portable-" + tag + ".zip", "ssh-tunnel-setup-" + tag + ".exe", "SHA256SUMS-windows"
+		return "portway-portable-" + tag + ".zip", "portway-setup-" + tag + ".exe", "SHA256SUMS-windows"
 	case c.OS == "linux" && c.Arch == "amd64":
-		return "ssh-tunnel-portable-" + tag + "-linux-x64.tar.gz", "", "SHA256SUMS-linux"
+		return "portway-portable-" + tag + "-linux-x64.tar.gz", "", "SHA256SUMS-linux"
 	case c.OS == "darwin" && (c.Arch == "arm64" || c.Arch == "amd64"):
-		return "ssh-tunnel-portable-" + tag + "-macos-" + c.Arch + ".zip", "", "SHA256SUMS-macos"
+		return "portway-portable-" + tag + "-macos-" + c.Arch + ".zip", "", "SHA256SUMS-macos"
 	default:
 		return "", "", ""
 	}

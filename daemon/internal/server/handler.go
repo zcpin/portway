@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/byteporter/ssh-tunnel/internal/config"
+	"github.com/byteporter/portway/internal/config"
 )
 
 // Version 由 main 在构建时注入。

@@ -1,6 +1,6 @@
 package manager
 
-import "github.com/byteporter/ssh-tunnel/internal/config"
+import "github.com/byteporter/portway/internal/config"
 
 func (m *Manager) ExportConfig() (config.ConfigExport, error) { return m.configIO.Export() }
 func (m *Manager) PreviewImport(input config.ImportRequest) (config.ImportPreview, error) {

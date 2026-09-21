@@ -1,8 +1,9 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ssh_tunnel_client/models.dart';
-import 'package:ssh_tunnel_client/services/embedded_engine.dart';
+import 'package:portway/models.dart';
+import 'package:portway/models/frp.dart';
+import 'package:portway/services/embedded_engine.dart';
 
 /// 进程内引擎的端到端验证：真的把 Go 编译出的动态库加载进来，走一遍 FFI。
 ///
@@ -188,5 +189,128 @@ void main() {
 
     await engine.deleteTunnel('demo');
     expect(await engine.getTunnels(), isEmpty);
+  });
+
+  test('FRP 客户端与代理的增删改查走通 FFI', () async {
+    final engine = await EmbeddedEngine.launch(configPath: configPath());
+    addTearDown(engine.close);
+
+    expect(await engine.getFrpClients(), isEmpty);
+
+    await engine.addFrpClient(const FrpClientPayload(
+      name: 'demo-frpc',
+      group: '测试',
+      serverAddr: '127.0.0.1',
+      serverPort: 1,
+      authToken: 'secret',
+      tlsEnable: true,
+    ));
+
+    var clients = await engine.getFrpClients();
+    expect(clients, hasLength(1));
+    expect(clients.single.name, 'demo-frpc');
+    expect(clients.single.group, '测试');
+    expect(clients.single.serverPort, 1);
+    expect(clients.single.authToken, 'secret');
+    expect(clients.single.proxies, isEmpty);
+
+    await engine.addFrpProxy('demo-frpc', const FrpProxyPayload(
+      name: 'mysql',
+      type: 'tcp',
+      localIp: '127.0.0.1',
+      localPort: 3306,
+      remotePort: 13306,
+    ));
+
+    clients = await engine.getFrpClients();
+    expect(clients.single.proxies, hasLength(1));
+    expect(clients.single.proxies.single.localPort, 3306);
+    expect(clients.single.proxies.single.remotePort, 13306);
+    expect(clients.single.proxies.single.enabled, isTrue);
+
+    // 三参数调用（客户端名 + 原代理名 + 新配置）：改名与改端口
+    await engine.updateFrpProxy(
+      'demo-frpc',
+      'mysql',
+      const FrpProxyPayload(
+        name: 'mysql-prod',
+        type: 'tcp',
+        localIp: '127.0.0.1',
+        localPort: 3306,
+        remotePort: 23306,
+      ),
+    );
+
+    clients = await engine.getFrpClients();
+    expect(clients.single.proxies.single.name, 'mysql-prod');
+    expect(clients.single.proxies.single.remotePort, 23306);
+
+    await engine.toggleFrpProxy('demo-frpc', 'mysql-prod', false);
+    clients = await engine.getFrpClients();
+    expect(clients.single.proxies.single.enabled, isFalse);
+
+    await engine.deleteFrpProxy('demo-frpc', 'mysql-prod');
+    expect((await engine.getFrpClients()).single.proxies, isEmpty);
+
+    await engine.deleteFrpClient('demo-frpc');
+    expect(await engine.getFrpClients(), isEmpty);
+  });
+
+  test('FRP 配置以 frp 原生 TOML 落在工作区目录下', () async {
+    final engine = await EmbeddedEngine.launch(configPath: configPath());
+    addTearDown(engine.close);
+
+    await engine.addFrpClient(const FrpClientPayload(
+      name: 'file-check',
+      group: '文件检查',
+      serverAddr: 'frps.example.com',
+      serverPort: 7000,
+      authToken: 'secret',
+    ));
+    await engine.addFrpProxy('file-check', const FrpProxyPayload(
+      name: 'mysql',
+      type: 'tcp',
+      localIp: '127.0.0.1',
+      localPort: 3306,
+      remotePort: 13306,
+    ));
+
+    final separator = Platform.pathSeparator;
+    final file = File('${tempDir.path}${separator}frp${separator}clients$separator'
+        'file-check.toml');
+    expect(file.existsSync(), isTrue, reason: '配置文件应位于工作区目录下');
+
+    final content = file.readAsStringSync();
+    // 键名必须是 frp 自己的小驼峰写法，这样文件可以直接交给官方 frpc 使用。
+    expect(content, contains('serverAddr = '));
+    expect(content, contains('[[proxies]]'));
+    expect(content, contains('remotePort = 13306'));
+    // 我们的元数据走 frp 原生字段，不新增私有段
+    expect(content, contains('mgrGroup'));
+    // 与 frp 默认值相同的字段会被省略，文件里只留用户改过的部分
+    expect(content, isNot(contains('serverPort')));
+    expect(content, isNot(contains('protocol = ')));
+  });
+
+  test('启动 FRP 客户端后状态可读，停止后回到未运行', () async {
+    final engine = await EmbeddedEngine.launch(configPath: configPath());
+    addTearDown(engine.close);
+
+    // 指向一个必然连不上的地址：frp 应当保持重试而不是退出
+    await engine.addFrpClient(const FrpClientPayload(
+      name: 'offline',
+      serverAddr: '127.0.0.1',
+      serverPort: 1,
+    ));
+
+    await engine.startFrpClient('offline');
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+
+    var client = (await engine.getFrpClients()).single;
+    expect(client.isRunning, isTrue, reason: '服务器不可达时不应自行退出');
+
+    await engine.stopFrpClient('offline');
+    client = (await engine.getFrpClients()).single;
+    expect(client.isRunning, isFalse);
   });
 }

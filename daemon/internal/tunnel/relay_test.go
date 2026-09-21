@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/byteporter/ssh-tunnel/internal/config"
+	"github.com/byteporter/portway/internal/config"
 	"golang.org/x/crypto/ssh"
 )
 

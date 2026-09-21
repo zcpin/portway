@@ -7,7 +7,7 @@ import (
 	"net"
 	"sync"
 
-	"github.com/byteporter/ssh-tunnel/internal/logger"
+	"github.com/byteporter/portway/internal/logger"
 )
 
 type Forwarder struct {

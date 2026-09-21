@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'models.dart';
+import 'models/frp.dart';
 import 'services/daemon_client.dart';
 import 'services/daemon_discovery.dart';
 import 'services/daemon_launcher.dart';
@@ -502,6 +503,109 @@ class KeysNotifier extends AsyncNotifier<List<KeyInfo>> {
 
 final keysProvider =
     AsyncNotifierProvider<KeysNotifier, List<KeyInfo>>(KeysNotifier.new);
+
+// ---------- FRP ----------
+
+/// FRP 客户端列表（含各自的代理与运行状态）。
+///
+/// 与隧道一样走「推送优先」：引擎每两秒兜底广播一次完整列表，
+/// 操作后也会主动刷新，两者用同一个版本号避免迟到的响应覆盖新数据。
+class FrpClientsNotifier extends AsyncNotifier<List<FrpClient>> {
+  int _pushRevision = 0;
+  List<FrpClient> _lastPush = const [];
+
+  /// 连接恢复或引擎推送时接收完整列表。
+  void applySnapshot(List<FrpClient> clients) {
+    _pushRevision++;
+    _lastPush = clients;
+    state = AsyncData(clients);
+  }
+
+  @override
+  Future<List<FrpClient>> build() async {
+    _pushRevision++;
+    _lastPush = const [];
+    final client = await ref.watch(clientProvider.future);
+    if (client == null) return [];
+    return _load(client);
+  }
+
+  Future<List<FrpClient>> _load(TunnelEngine client) async {
+    final revision = _pushRevision;
+    try {
+      final clients = await client.getFrpClients();
+      return revision == _pushRevision ? clients : _lastPush;
+    } catch (_) {
+      if (revision != _pushRevision) return _lastPush;
+      rethrow;
+    }
+  }
+
+  Future<void> refresh() async {
+    final client = await ref.read(clientProvider.future);
+    if (client == null) {
+      state = const AsyncData([]);
+      return;
+    }
+    if (!_clientIsCurrent(ref, client)) return;
+    if (state.valueOrNull == null) state = const AsyncLoading();
+    final next = await AsyncValue.guard(() => _load(client));
+    if (_clientIsCurrent(ref, client)) state = next;
+  }
+
+  /// 执行一个动作并在成功后刷新；失败时把异常抛给页面提示。
+  Future<void> _act(Future<void> Function(TunnelEngine) action) async {
+    final client = await ref.read(clientProvider.future);
+    if (client == null) {
+      throw StateError('未连接到引擎');
+    }
+    if (!_clientIsCurrent(ref, client)) return;
+    await action(client);
+    if (!_clientIsCurrent(ref, client)) return;
+    await refresh();
+  }
+
+  Future<void> saveClient(FrpClientPayload payload, {String? editingName}) async {
+    final client = await ref.read(clientProvider.future);
+    if (client == null) throw StateError('未连接到引擎');
+    if (!_clientIsCurrent(ref, client)) return;
+    if (editingName == null || editingName.isEmpty) {
+      await client.addFrpClient(payload);
+    } else {
+      await client.updateFrpClient(editingName, payload);
+    }
+    if (!_clientIsCurrent(ref, client)) return;
+    await refresh();
+  }
+
+  Future<void> removeClient(String name) => _act((c) => c.deleteFrpClient(name));
+  Future<void> startClient(String name) => _act((c) => c.startFrpClient(name));
+  Future<void> stopClient(String name) => _act((c) => c.stopFrpClient(name));
+  Future<void> restartClient(String name) => _act((c) => c.restartFrpClient(name));
+
+  Future<void> saveProxy(String client, FrpProxyPayload payload, {String? editingName}) async {
+    final engine = await ref.read(clientProvider.future);
+    if (engine == null) throw StateError('未连接到引擎');
+    if (!_clientIsCurrent(ref, engine)) return;
+    if (editingName == null || editingName.isEmpty) {
+      await engine.addFrpProxy(client, payload);
+    } else {
+      await engine.updateFrpProxy(client, editingName, payload);
+    }
+    if (!_clientIsCurrent(ref, engine)) return;
+    await refresh();
+  }
+
+  Future<void> removeProxy(String client, String proxy) =>
+      _act((c) => c.deleteFrpProxy(client, proxy));
+
+  /// 启用或停用一条代理。引擎侧走 frp 的热更新，不会断开与 frps 的连接。
+  Future<void> toggleProxy(String client, String proxy, bool enabled) =>
+      _act((c) => c.toggleFrpProxy(client, proxy, enabled));
+}
+
+final frpClientsProvider =
+    AsyncNotifierProvider<FrpClientsNotifier, List<FrpClient>>(FrpClientsNotifier.new);
 
 // ---------- 日志 ----------
 

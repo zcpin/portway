@@ -2,11 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ssh_tunnel_client/models.dart';
-import 'package:ssh_tunnel_client/pages/connections_page.dart';
-import 'package:ssh_tunnel_client/pages/tunnels_page.dart';
-import 'package:ssh_tunnel_client/providers.dart';
-import 'package:ssh_tunnel_client/services/daemon_client.dart';
+import 'package:portway/models.dart';
+import 'package:portway/pages/connections_page.dart';
+import 'package:portway/pages/tunnels_page.dart';
+import 'package:portway/providers.dart';
+import 'package:portway/services/daemon_client.dart';
 
 class _DiagnosticClient extends DaemonClient {
   _DiagnosticClient()

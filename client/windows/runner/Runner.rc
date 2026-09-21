@@ -90,12 +90,12 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "com.byteporter" "\0"
-            VALUE "FileDescription", "ssh_tunnel_client" "\0"
+            VALUE "FileDescription", "Portway" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "ssh_tunnel_client" "\0"
+            VALUE "InternalName", "portway" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 com.byteporter. All rights reserved." "\0"
-            VALUE "OriginalFilename", "ssh_tunnel_client.exe" "\0"
-            VALUE "ProductName", "ssh_tunnel_client" "\0"
+            VALUE "OriginalFilename", "portway.exe" "\0"
+            VALUE "ProductName", "Portway" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

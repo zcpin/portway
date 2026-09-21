@@ -70,7 +70,7 @@ class AppTray with TrayListener {
       await trayManager.setIcon(await _resolveIconPath());
       _initialized = true;
       if (_disposed) return;
-      await trayManager.setToolTip('SSH 隧道管理器');
+      await trayManager.setToolTip('端口通');
       await _refreshMenu();
     } catch (e) {
       // 托盘在某些 Linux 桌面环境下不可用，忽略即可

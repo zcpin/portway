@@ -3,7 +3,7 @@ package manager
 import (
 	"testing"
 
-	"github.com/byteporter/ssh-tunnel/internal/config"
+	"github.com/byteporter/portway/internal/config"
 )
 
 func TestAutoStartPolicyAndMetadataPreserveManualState(t *testing.T) {

@@ -1,10 +1,10 @@
 name: Release
 
 # 在推送 v* 标签或手动触发时，构建各平台发布产物并上传：
-#   Windows：ssh-tunnel-setup-<版本>.exe（Inno Setup 安装包）
-#            ssh-tunnel-portable-<版本>.zip（便携版）
-#   Linux：  ssh-tunnel-portable-<版本>-linux-x64.tar.gz
-#   macOS：  ssh-tunnel-portable-<版本>-macos-<arch>.zip
+#   Windows：portway-setup-<版本>.exe（Inno Setup 安装包）
+#            portway-portable-<版本>.zip（便携版）
+#   Linux：  portway-portable-<版本>-linux-x64.tar.gz
+#   macOS：  portway-portable-<版本>-macos-<arch>.zip
 # 推送标签时，publish job 会把三平台产物统一发布到对应的 GitHub Release。
 #
 # 用法：
@@ -93,13 +93,13 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          foreach ($f in @("dist\ssh-tunnel-setup-$env:VERSION.exe", "dist\ssh-tunnel-portable-$env:VERSION.zip")) {
+          foreach ($f in @("dist\portway-setup-$env:VERSION.exe", "dist\portway-portable-$env:VERSION.zip")) {
             if (-not (Test-Path $f)) { Write-Error "Missing artifact: $f"; exit 1 }
           }
           $bundle = 'client\build\windows\x64\runner\Release'
-          $daemonVersion = & "$bundle\ssh-tunnel-daemon.exe" -version
+          $daemonVersion = & "$bundle\portway-daemon.exe" -version
           if ($LASTEXITCODE -ne 0 -or $daemonVersion -cne $env:VERSION) { throw 'Daemon version mismatch' }
-          $clientVersion = (Get-Item "$bundle\ssh_tunnel_client.exe").VersionInfo
+          $clientVersion = (Get-Item "$bundle\portway.exe").VersionInfo
           $actual = '{0}.{1}.{2}.{3}' -f $clientVersion.FileMajorPart, $clientVersion.FileMinorPart, $clientVersion.FileBuildPart, $clientVersion.FilePrivatePart
           if ($actual -cne "$env:BUILD_NAME.$env:BUILD_NUMBER") { throw "Client version mismatch: $actual" }
 
@@ -107,13 +107,13 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          Get-FileHash "dist\ssh-tunnel-setup-$env:VERSION.exe", "dist\ssh-tunnel-portable-$env:VERSION.zip" -Algorithm SHA256 |
+          Get-FileHash "dist\portway-setup-$env:VERSION.exe", "dist\portway-portable-$env:VERSION.zip" -Algorithm SHA256 |
             ForEach-Object { "{0}  {1}" -f $_.Hash.ToLower(), [IO.Path]::GetFileName($_.Path) } |
             Out-File -Encoding ascii "dist\SHA256SUMS-windows"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ssh-tunnel-windows-${{ env.VERSION }}
+          name: portway-windows-${{ env.VERSION }}
           if-no-files-found: error
           path: |
             dist/*.exe
@@ -159,29 +159,29 @@ jobs:
           cd daemon
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
             -ldflags "-s -w -X main.version=$VERSION -X main.releaseRepository=$GITHUB_REPOSITORY" \
-            -o "../$bundle/ssh-tunnel-daemon" ./cmd/ssh-tunnel
+            -o "../$bundle/portway-daemon" ./cmd/portway-daemon
 
       - name: Verify daemon version
-        run: test "$(client/build/linux/x64/release/bundle/ssh-tunnel-daemon -version)" = "$VERSION"
+        run: test "$(client/build/linux/x64/release/bundle/portway-daemon -version)" = "$VERSION"
 
       - name: Copy sample config
         run: cp daemon/ssh-tunnel.example.toml client/build/linux/x64/release/bundle/
 
       - name: Mark portable bundle
-        run: client/build/linux/x64/release/bundle/ssh-tunnel-daemon update mark-portable
+        run: client/build/linux/x64/release/bundle/portway-daemon update mark-portable
 
       - name: Pack portable tar.gz
         run: |
           mkdir -p dist
-          tar -C client/build/linux/x64/release/bundle -czf "dist/ssh-tunnel-portable-$VERSION-linux-x64.tar.gz" .
+          tar -C client/build/linux/x64/release/bundle -czf "dist/portway-portable-$VERSION-linux-x64.tar.gz" .
 
       - name: Generate checksums
         run: |
-          (cd dist && sha256sum "ssh-tunnel-portable-$VERSION-linux-x64.tar.gz") > "dist/SHA256SUMS-linux"
+          (cd dist && sha256sum "portway-portable-$VERSION-linux-x64.tar.gz") > "dist/SHA256SUMS-linux"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ssh-tunnel-linux-${{ env.VERSION }}
+          name: portway-linux-${{ env.VERSION }}
           if-no-files-found: error
           path: |
             dist/*.tar.gz
@@ -226,29 +226,29 @@ jobs:
       # daemon 打进 .app 的 MacOS 目录，与客户端可执行文件同目录。
       - name: Build daemon into .app
         run: |
-          app=client/build/macos/Build/Products/Release/ssh_tunnel_client.app
+          app=client/build/macos/Build/Products/Release/portway.app
           cd daemon
           CGO_ENABLED=0 GOOS=darwin GOARCH=$GOARCH go build -trimpath \
             -ldflags "-s -w -X main.version=$VERSION -X main.releaseRepository=$GITHUB_REPOSITORY" \
-            -o "../$app/Contents/MacOS/ssh-tunnel-daemon" ./cmd/ssh-tunnel
+            -o "../$app/Contents/MacOS/portway-daemon" ./cmd/portway-daemon
 
       - name: Copy sample config
-        run: cp daemon/ssh-tunnel.example.toml client/build/macos/Build/Products/Release/ssh_tunnel_client.app/Contents/Resources/
+        run: cp daemon/ssh-tunnel.example.toml client/build/macos/Build/Products/Release/portway.app/Contents/Resources/
 
       - name: Mark portable bundle
-        run: client/build/macos/Build/Products/Release/ssh_tunnel_client.app/Contents/MacOS/ssh-tunnel-daemon update mark-portable
+        run: client/build/macos/Build/Products/Release/portway.app/Contents/MacOS/portway-daemon update mark-portable
 
       # 无开发者证书，做 ad-hoc 签名（--deep 会一并签名 Flutter 框架与嵌入的 daemon）；
       # 分发到其它 Mac 首次需右键「打开」绕过 Gatekeeper。
       - name: Ad-hoc codesign
         run: |
-          app=client/build/macos/Build/Products/Release/ssh_tunnel_client.app
+          app=client/build/macos/Build/Products/Release/portway.app
           codesign --force --deep --sign - "$app"
 
       - name: Verify bundle versions
         run: |
-          app=client/build/macos/Build/Products/Release/ssh_tunnel_client.app
-          test "$("$app/Contents/MacOS/ssh-tunnel-daemon" -version)" = "$VERSION"
+          app=client/build/macos/Build/Products/Release/portway.app
+          test "$("$app/Contents/MacOS/portway-daemon" -version)" = "$VERSION"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = "$BUILD_NAME"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Contents/Info.plist")" = "$BUILD_NUMBER"
 
@@ -256,16 +256,16 @@ jobs:
         run: |
           mkdir -p dist
           ditto -c -k --sequesterRsrc --keepParent \
-            client/build/macos/Build/Products/Release/ssh_tunnel_client.app \
-            "dist/ssh-tunnel-portable-$VERSION-macos-$GOARCH.zip"
+            client/build/macos/Build/Products/Release/portway.app \
+            "dist/portway-portable-$VERSION-macos-$GOARCH.zip"
 
       - name: Generate checksums
         run: |
-          (cd dist && shasum -a 256 "ssh-tunnel-portable-$VERSION-macos-$GOARCH.zip") > "dist/SHA256SUMS-macos"
+          (cd dist && shasum -a 256 "portway-portable-$VERSION-macos-$GOARCH.zip") > "dist/SHA256SUMS-macos"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ssh-tunnel-macos-${{ env.VERSION }}
+          name: portway-macos-${{ env.VERSION }}
           if-no-files-found: error
           path: |
             dist/*.zip
@@ -286,7 +286,7 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          pattern: ssh-tunnel-*
+          pattern: portway-*
           path: release-assets
           merge-multiple: true
 

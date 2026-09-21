@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ssh_tunnel_client/models.dart';
-import 'package:ssh_tunnel_client/pages/tunnels_page.dart';
-import 'package:ssh_tunnel_client/providers.dart';
+import 'package:portway/models.dart';
+import 'package:portway/pages/tunnels_page.dart';
+import 'package:portway/providers.dart';
 
 class _Rows extends TunnelsNotifier {
   final rows = [

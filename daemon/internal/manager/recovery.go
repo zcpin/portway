@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/byteporter/ssh-tunnel/internal/tunnel"
+	"github.com/byteporter/portway/internal/tunnel"
 )
 
 func (m *Manager) RecoverNetwork(ctx context.Context, reason string) {

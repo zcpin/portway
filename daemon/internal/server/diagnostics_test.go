@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/byteporter/ssh-tunnel/internal/tunnel"
+	"github.com/byteporter/portway/internal/tunnel"
 )
 
 func TestTunnelDiagnosticsAreAuthenticatedAndPreserveConfiguration(t *testing.T) {

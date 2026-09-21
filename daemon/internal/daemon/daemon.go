@@ -19,11 +19,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/byteporter/ssh-tunnel/internal/app"
-	"github.com/byteporter/ssh-tunnel/internal/discovery"
-	"github.com/byteporter/ssh-tunnel/internal/logger"
-	"github.com/byteporter/ssh-tunnel/internal/server"
-	"github.com/byteporter/ssh-tunnel/internal/update"
+	"github.com/byteporter/portway/internal/app"
+	"github.com/byteporter/portway/internal/discovery"
+	"github.com/byteporter/portway/internal/logger"
+	"github.com/byteporter/portway/internal/server"
+	"github.com/byteporter/portway/internal/update"
 )
 
 // Options 是启动守护进程所需的全部参数。

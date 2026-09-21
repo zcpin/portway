@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 
 import '../models.dart';
+import '../models/frp.dart';
 import '../models/tunnel_diagnostic.dart';
 
 /// 客户端与隧道引擎之间的统一契约。
@@ -67,10 +68,32 @@ abstract class TunnelEngine {
   /// 写入信任的主机密钥；变更已有密钥需要 [replace] 为 true。
   Future<HostKeyInfo> trustHostKey(SshConnection connection, String fingerprint, bool replace);
 
+  // ---------- FRP ----------
+
+  /// 全部 FRP 客户端，每项含其代理与运行状态。
+  Future<List<FrpClient>> getFrpClients();
+
+  Future<void> addFrpClient(FrpClientPayload client);
+  Future<void> updateFrpClient(String name, FrpClientPayload client);
+  Future<void> deleteFrpClient(String name);
+  Future<void> startFrpClient(String name);
+  Future<void> stopFrpClient(String name);
+  Future<void> restartFrpClient(String name);
+
+  /// 在客户端下新增一条代理。
+  Future<void> addFrpProxy(String client, FrpProxyPayload proxy);
+
+  /// 更新一条代理；[proxy] 是原名称，改名也在这一次调用里完成。
+  Future<void> updateFrpProxy(String client, String proxy, FrpProxyPayload payload);
+
+  Future<void> deleteFrpProxy(String client, String proxy);
+
+  /// 启用或停用一条代理。服务端热更新生效，不会断开与 frps 的连接。
+  Future<void> toggleFrpProxy(String client, String proxy, bool enabled);
+
   // ---------- 私钥 ----------
 
   Future<List<KeyInfo>> getKeys();
-
   /// 校验一个私钥路径是否可读。
   Future<KeyInfo> statKey(String path);
 

@@ -1,13 +1,13 @@
 # ============================================================
 #  构建「进程内引擎」动态库（Go -buildmode=c-shared）
 #
-#  产物：daemon/bin/ssh-tunnel.dll      (Windows)
-#        daemon/bin/libssh-tunnel.dylib (macOS)
-#        daemon/bin/libssh-tunnel.so    (Linux)
+#  产物：daemon/bin/portway.dll      (Windows)
+#        daemon/bin/libportway.dylib (macOS)
+#        daemon/bin/libportway.so    (Linux)
 #
 #  客户端启动时会在自己的可执行文件同目录查找这个库；开发时也可以
 #  用环境变量直接指定：
-#      $env:SSH_TUNNEL_EMBEDDED_LIB = 'C:\path\to\ssh-tunnel.dll'
+#      $env:SSH_TUNNEL_EMBEDDED_LIB = 'C:\path\to\portway.dll'
 #
 #  用法：
 #      pwsh scripts/build_engine.ps1 [-Version 1.2.3] [-Toolchain <gcc 路径>]
@@ -39,9 +39,9 @@ function Get-HostOS {
 
 # ---------- 1. 目标平台与产物名 ----------
 switch (Get-HostOS) {
-    'windows' { $outName = 'ssh-tunnel.dll' }
-    'darwin' { $outName = 'libssh-tunnel.dylib' }
-    default { $outName = 'libssh-tunnel.so' }
+    'windows' { $outName = 'portway.dll' }
+    'darwin' { $outName = 'libportway.dylib' }
+    default { $outName = 'libportway.so' }
 }
 
 $outPath = Join-Path $binDir $outName
@@ -95,7 +95,7 @@ $env:CC = $compiler
 # mingw 的 gcc 依赖同目录的 dll / 工具，必须并进 PATH，否则链接阶段找不到。
 $env:PATH = "$(Split-Path -Parent $compiler)$([IO.Path]::PathSeparator)$env:PATH"
 
-$ldflags = "-s -w -X github.com/byteporter/ssh-tunnel/internal/embedded.Version=$Version"
+$ldflags = "-s -w -X github.com/byteporter/portway/internal/embedded.Version=$Version"
 
 Write-Host "[engine] 目标平台 : $hostOS"
 Write-Host "[engine] C 编译器 : $compiler"
@@ -105,7 +105,7 @@ $LASTEXITCODE = 0
 Push-Location $daemonDir
 try {
     & go build -trimpath -buildmode=c-shared -ldflags $ldflags `
-        -o $outPath ./cmd/libssh-tunnel
+        -o $outPath ./cmd/portway-engine
     if ($LASTEXITCODE -ne 0) { throw "go build 失败（退出码 $LASTEXITCODE）" }
 } finally {
     Pop-Location

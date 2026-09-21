@@ -1,11 +1,12 @@
-// Command ssh-tunnel 是本地守护进程：管理 SSH 隧道，并通过回环地址上的
+// Command portway-daemon 是本地隧道管理守护进程：管理 SSH 隧道，并通过回环地址上的
 // HTTP API 与 WebSocket 事件流对外暴露控制能力。它不提供任何界面。
 //
 // 用法：
 //
-//	ssh-tunnel-daemon                     前台运行（默认）
-//	ssh-tunnel-daemon autostart enable    随用户登录自动启动（无需管理员权限）
-//	ssh-tunnel-daemon service install     安装为系统服务（需要管理员权限）
+//	portway-daemon                     前台运行（默认）
+//	portway-daemon autostart enable    随用户登录自动启动（无需管理员权限）
+//	portway-daemon service install     安装为系统服务（需要管理员权限）
+//	portway-daemon update <动作>       检查版本、下载及校验发布包
 package main
 
 import (
@@ -16,17 +17,17 @@ import (
 
 	"github.com/kardianos/service"
 
-	"github.com/byteporter/ssh-tunnel/internal/autostart"
-	daemonpkg "github.com/byteporter/ssh-tunnel/internal/daemon"
-	"github.com/byteporter/ssh-tunnel/internal/svc"
-	"github.com/byteporter/ssh-tunnel/internal/update"
+	"github.com/byteporter/portway/internal/autostart"
+	daemonpkg "github.com/byteporter/portway/internal/daemon"
+	"github.com/byteporter/portway/internal/svc"
+	"github.com/byteporter/portway/internal/update"
 )
 
 // version 由构建脚本注入：-ldflags "-X main.version=v1.2.3"
 var version = "dev"
 
 // Release builds inject the actual repository, including forks.
-var releaseRepository = "byteporter/ssh-tunnel"
+var releaseRepository = "zcpin/portway"
 
 func main() {
 	args := os.Args[1:]
@@ -95,7 +96,7 @@ func splitAction(args []string) (string, []string) {
 // ---------- 前台运行 ----------
 
 func runForeground(args []string) int {
-	fs, c := newFlagSet("ssh-tunnel-daemon")
+	fs, c := newFlagSet("portway-daemon")
 	showVersion := fs.Bool("version", false, "显示版本并退出")
 	hideConsole := fs.Bool("hide-console", false, "隐藏控制台窗口（开机自启时使用）")
 
@@ -171,7 +172,7 @@ func handleAutostart(args []string) int {
 		}
 
 	default:
-		fmt.Fprintln(os.Stderr, "用法: ssh-tunnel-daemon autostart enable|disable|status")
+		fmt.Fprintln(os.Stderr, "用法: portway-daemon autostart enable|disable|status")
 		return 2
 	}
 	return 0
@@ -251,7 +252,7 @@ func handleService(args []string) int {
 		fmt.Printf("服务状态: %s\n", describeStatus(status))
 
 	default:
-		fmt.Fprintln(os.Stderr, "用法: ssh-tunnel-daemon service install|uninstall|start|stop|restart|status")
+		fmt.Fprintln(os.Stderr, "用法: portway-daemon service install|uninstall|start|stop|restart|status")
 		return 2
 	}
 	return 0
@@ -315,13 +316,13 @@ func describeStatus(s service.Status) string {
 // ---------- 帮助 ----------
 
 func printUsage() {
-	fmt.Print(`ssh-tunnel-daemon —— 本地 SSH 隧道管理守护进程
+	fmt.Print(`portway-daemon —— 本地隧道管理守护进程
 
 用法:
-  ssh-tunnel-daemon [选项]                    前台运行
-  ssh-tunnel-daemon autostart <动作> [选项]   随用户登录自动启动（推荐，无需管理员权限）
-  ssh-tunnel-daemon service <动作> [选项]     系统服务托管（需要管理员/root 权限）
-  ssh-tunnel-daemon update <动作> [选项]      检查版本、下载及校验发布包
+  portway-daemon [选项]                    前台运行
+  portway-daemon autostart <动作> [选项]   随用户登录自动启动（推荐，无需管理员权限）
+  portway-daemon service <动作> [选项]     系统服务托管（需要管理员/root 权限）
+  portway-daemon update <动作> [选项]      检查版本、下载及校验发布包
 
 autostart 动作:
   enable     登记开机自启
@@ -349,8 +350,8 @@ service 动作:
   -version            显示版本
 
 示例:
-  ssh-tunnel-daemon -config ~/.ssh-tunnel/config.toml
-  ssh-tunnel-daemon autostart enable -config ~/.ssh-tunnel/config.toml
-  ssh-tunnel-daemon service install -config ~/.ssh-tunnel/config.toml
+  portway-daemon -config ~/.ssh-tunnel/config.toml
+  portway-daemon autostart enable -config ~/.ssh-tunnel/config.toml
+  portway-daemon service install -config ~/.ssh-tunnel/config.toml
 `)
 }

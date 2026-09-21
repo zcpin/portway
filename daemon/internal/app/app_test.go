@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/byteporter/ssh-tunnel/internal/logger"
+	"github.com/byteporter/portway/internal/logger"
 )
 
 func settingsApp(t *testing.T) (*App, string) {

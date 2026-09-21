@@ -19,7 +19,7 @@ class DesktopNotifications {
       // Initialize only when there is an alert. Windows needs the app shortcut
       // registered by WinToast; other platforms use their notification service.
       await (_setup ??= localNotifier.setup(
-        appName: 'SSH Tunnel Manager',
+        appName: 'Portway',
         shortcutPolicy: ShortcutPolicy.requireCreate,
       ));
       if (_disposed || !stillRelevant()) return;

@@ -21,9 +21,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/byteporter/ssh-tunnel/internal/app"
-	"github.com/byteporter/ssh-tunnel/internal/config"
-	daemonpkg "github.com/byteporter/ssh-tunnel/internal/daemon"
+	"github.com/byteporter/portway/internal/app"
+	"github.com/byteporter/portway/internal/config"
+	daemonpkg "github.com/byteporter/portway/internal/daemon"
+	"github.com/byteporter/portway/internal/frp"
 )
 
 // Version 由构建脚本注入：-ldflags "-X .../internal/embedded.Version=v1.2.3"。
@@ -381,12 +382,85 @@ func (e *Engine) LockKey(path string) string {
 	})
 }
 
+// ---------- FRP ----------
+
+// FrpClients 返回 FRP 客户端列表（含代理与运行状态），结构与 /api/frp/clients 一致。
+func (e *Engine) FrpClients() string { return ok(e.app.GetFrpClients()) }
+
+// AddFrpClient 新建 FRP 客户端，请求体为 frp.ClientPayload。
+func (e *Engine) AddFrpClient(payload string) string {
+	var input frp.ClientPayload
+	if err := decodeStrict(payload, &input); err != nil {
+		return fail(err)
+	}
+	return e.void(func() error { return e.app.AddFrpClient(input) })
+}
+
+// UpdateFrpClient 更新 FRP 客户端配置。
+func (e *Engine) UpdateFrpClient(name, payload string) string {
+	var input frp.ClientPayload
+	if err := decodeStrict(payload, &input); err != nil {
+		return fail(err)
+	}
+	return e.void(func() error { return e.app.UpdateFrpClient(name, input) })
+}
+
+// DeleteFrpClient 删除 FRP 客户端。
+func (e *Engine) DeleteFrpClient(name string) string {
+	return e.void(func() error { return e.app.DeleteFrpClient(name) })
+}
+
+// StartFrpClient / StopFrpClient / RestartFrpClient 控制单个 FRP 客户端。
+func (e *Engine) StartFrpClient(name string) string {
+	return e.void(func() error { return e.app.StartFrpClient(name) })
+}
+
+func (e *Engine) StopFrpClient(name string) string {
+	return e.void(func() error { return e.app.StopFrpClient(name) })
+}
+
+func (e *Engine) RestartFrpClient(name string) string {
+	return e.void(func() error { return e.app.RestartFrpClient(name) })
+}
+
+// AddFrpProxy 新增一条代理，请求体为 frp.ProxyPayload。
+func (e *Engine) AddFrpProxy(client, payload string) string {
+	var input frp.ProxyPayload
+	if err := decodeStrict(payload, &input); err != nil {
+		return fail(err)
+	}
+	return e.void(func() error { return e.app.AddFrpProxy(client, input) })
+}
+
+// UpdateFrpProxy 更新一条代理（改名也走这里）。
+func (e *Engine) UpdateFrpProxy(client, proxy, payload string) string {
+	var input frp.ProxyPayload
+	if err := decodeStrict(payload, &input); err != nil {
+		return fail(err)
+	}
+	return e.void(func() error { return e.app.UpdateFrpProxy(client, proxy, input) })
+}
+
+// DeleteFrpProxy 删除一条代理。
+func (e *Engine) DeleteFrpProxy(client, proxy string) string {
+	return e.void(func() error { return e.app.DeleteFrpProxy(client, proxy) })
+}
+
+// ToggleFrpProxy 启用或停用一条代理，请求体为 {"enabled":true}。
+func (e *Engine) ToggleFrpProxy(client, proxy, payload string) string {
+	var input struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := decodeStrict(payload, &input); err != nil {
+		return fail(err)
+	}
+	return e.void(func() error { return e.app.ToggleFrpProxy(client, proxy, input.Enabled) })
+}
+
 // ---------- 配置 ----------
 
 // Reload 从磁盘重新加载配置并推送快照。
-func (e *Engine) Reload() string { return e.void(e.app.ReloadConfig) }
-
-// SetGlobalSettings 更新全局配置项，套用新默认值的运行中隧道会被重启。
+func (e *Engine) Reload() string { return e.void(e.app.ReloadConfig) } // SetGlobalSettings 更新全局配置项，套用新默认值的运行中隧道会被重启。
 func (e *Engine) SetGlobalSettings(payload string) string {
 	var input config.GlobalSettings
 	if err := decodeStrict(payload, &input); err != nil {

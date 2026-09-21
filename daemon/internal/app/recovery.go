@@ -3,7 +3,7 @@ package app
 import (
 	"context"
 
-	"github.com/byteporter/ssh-tunnel/internal/networkwatch"
+	"github.com/byteporter/portway/internal/networkwatch"
 )
 
 func (a *App) WatchNetwork(ctx context.Context) {

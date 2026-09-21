@@ -15,7 +15,7 @@ import (
 )
 
 // Name 是自启项在各平台上登记的名称，同时用于派生相关文件名。
-const Name = "ssh-tunnel-daemon"
+const Name = "portway-daemon"
 
 // Enable 登记开机自启。args 会原样附加到命令后（通常用于指定配置文件路径）。
 func Enable(args []string) error {

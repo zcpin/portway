@@ -45,14 +45,33 @@ static void my_application_activate(GApplication* application) {
   if (use_header_bar) {
     GtkHeaderBar* header_bar = GTK_HEADER_BAR(gtk_header_bar_new());
     gtk_widget_show(GTK_WIDGET(header_bar));
-    gtk_header_bar_set_title(header_bar, "ssh_tunnel_client");
+    gtk_header_bar_set_title(header_bar, "Portway");
     gtk_header_bar_set_show_close_button(header_bar, TRUE);
     gtk_window_set_titlebar(window, GTK_WIDGET(header_bar));
   } else {
-    gtk_window_set_title(window, "ssh_tunnel_client");
+    gtk_window_set_title(window, "Portway");
   }
 
   gtk_window_set_default_size(window, 1280, 720);
+
+  // 窗口图标：发布包把 PNG 放在可执行文件同目录；flutter run 则走 Flutter 资产。
+  {
+    g_autofree gchar* exe = g_file_read_link("/proc/self/exe", nullptr);
+    if (exe != nullptr) {
+      g_autofree gchar* dir = g_path_get_dirname(exe);
+      const gchar* candidates[] = {
+          "portway.png",
+          "data/flutter_assets/assets/app_icon.png",
+      };
+      for (gsize i = 0; i < G_N_ELEMENTS(candidates); i++) {
+        g_autofree gchar* icon_path = g_build_filename(dir, candidates[i], nullptr);
+        if (g_file_test(icon_path, G_FILE_TEST_IS_REGULAR) &&
+            gtk_window_set_icon_from_file(window, icon_path, nullptr)) {
+          break;
+        }
+      }
+    }
+  }
 
   g_autoptr(FlDartProject) project = fl_dart_project_new();
   fl_dart_project_set_dart_entrypoint_arguments(

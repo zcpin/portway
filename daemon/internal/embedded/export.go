@@ -337,6 +337,73 @@ func sshtunnel_lock_key(handle C.longlong, path *C.char) *C.char {
 	return with(handle, func(engine *Engine) string { return engine.LockKey(C.GoString(path)) })
 }
 
+// ---------- FRP ----------
+
+//export sshtunnel_frp_clients
+func sshtunnel_frp_clients(handle C.longlong) *C.char {
+	return with(handle, func(engine *Engine) string { return engine.FrpClients() })
+}
+
+//export sshtunnel_frp_add_client
+func sshtunnel_frp_add_client(handle C.longlong, payload *C.char) *C.char {
+	return with(handle, func(engine *Engine) string { return engine.AddFrpClient(C.GoString(payload)) })
+}
+
+//export sshtunnel_frp_update_client
+func sshtunnel_frp_update_client(handle C.longlong, name *C.char, payload *C.char) *C.char {
+	return with(handle, func(engine *Engine) string {
+		return engine.UpdateFrpClient(C.GoString(name), C.GoString(payload))
+	})
+}
+
+//export sshtunnel_frp_delete_client
+func sshtunnel_frp_delete_client(handle C.longlong, name *C.char) *C.char {
+	return with(handle, func(engine *Engine) string { return engine.DeleteFrpClient(C.GoString(name)) })
+}
+
+//export sshtunnel_frp_start_client
+func sshtunnel_frp_start_client(handle C.longlong, name *C.char) *C.char {
+	return with(handle, func(engine *Engine) string { return engine.StartFrpClient(C.GoString(name)) })
+}
+
+//export sshtunnel_frp_stop_client
+func sshtunnel_frp_stop_client(handle C.longlong, name *C.char) *C.char {
+	return with(handle, func(engine *Engine) string { return engine.StopFrpClient(C.GoString(name)) })
+}
+
+//export sshtunnel_frp_restart_client
+func sshtunnel_frp_restart_client(handle C.longlong, name *C.char) *C.char {
+	return with(handle, func(engine *Engine) string { return engine.RestartFrpClient(C.GoString(name)) })
+}
+
+//export sshtunnel_frp_add_proxy
+func sshtunnel_frp_add_proxy(handle C.longlong, client *C.char, payload *C.char) *C.char {
+	return with(handle, func(engine *Engine) string {
+		return engine.AddFrpProxy(C.GoString(client), C.GoString(payload))
+	})
+}
+
+//export sshtunnel_frp_update_proxy
+func sshtunnel_frp_update_proxy(handle C.longlong, client *C.char, proxy *C.char, payload *C.char) *C.char {
+	return with(handle, func(engine *Engine) string {
+		return engine.UpdateFrpProxy(C.GoString(client), C.GoString(proxy), C.GoString(payload))
+	})
+}
+
+//export sshtunnel_frp_delete_proxy
+func sshtunnel_frp_delete_proxy(handle C.longlong, client *C.char, proxy *C.char) *C.char {
+	return with(handle, func(engine *Engine) string {
+		return engine.DeleteFrpProxy(C.GoString(client), C.GoString(proxy))
+	})
+}
+
+//export sshtunnel_frp_toggle_proxy
+func sshtunnel_frp_toggle_proxy(handle C.longlong, client *C.char, proxy *C.char, payload *C.char) *C.char {
+	return with(handle, func(engine *Engine) string {
+		return engine.ToggleFrpProxy(C.GoString(client), C.GoString(proxy), C.GoString(payload))
+	})
+}
+
 //export sshtunnel_reload
 func sshtunnel_reload(handle C.longlong) *C.char {
 	return with(handle, func(engine *Engine) string { return engine.Reload() })

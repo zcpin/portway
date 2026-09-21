@@ -68,17 +68,17 @@ func TestArchiveRejectsTraversalAndAmbiguity(t *testing.T) {
 }
 
 func TestArchivePreservesFilesAndInternalLinks(t *testing.T) {
-	entries := []zipEntry{{"ssh_tunnel_client.app/Contents/MacOS/client", "binary", 0755}}
+	entries := []zipEntry{{"portway.app/Contents/MacOS/client", "binary", 0755}}
 	if runtime.GOOS != "windows" {
-		entries = append(entries, zipEntry{"ssh_tunnel_client.app/Contents/current", "MacOS", fs.ModeSymlink | 0777})
+		entries = append(entries, zipEntry{"portway.app/Contents/current", "MacOS", fs.ModeSymlink | 0777})
 	}
 	dir := filepath.Join(t.TempDir(), "extracted")
 	if err := extractArchive(makeZip(t, entries...), dir, "darwin"); err != nil {
 		t.Fatal(err)
 	}
-	file := filepath.Join(dir, "ssh_tunnel_client.app", "Contents", "MacOS", "client")
+	file := filepath.Join(dir, "portway.app", "Contents", "MacOS", "client")
 	if runtime.GOOS != "windows" {
-		file = filepath.Join(dir, "ssh_tunnel_client.app", "Contents", "current", "client")
+		file = filepath.Join(dir, "portway.app", "Contents", "current", "client")
 	}
 	data, err := os.ReadFile(file)
 	if err != nil || string(data) != "binary" {

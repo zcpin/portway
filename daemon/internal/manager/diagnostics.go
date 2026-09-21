@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/byteporter/ssh-tunnel/internal/tunnel"
+	"github.com/byteporter/portway/internal/tunnel"
 )
 
 func (m *Manager) DiagnoseTunnel(ctx context.Context, name string) (tunnel.TunnelDiagnostic, error) {

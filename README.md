@@ -1,6 +1,9 @@
-# SSH Tunnel
+# Portway
 
-本地 SSH 隧道管理工具。把一个远端端口映射到本地，常用于安全地访问内网数据库、缓存等不对外暴露的服务。
+本地端口转发管理工具，支持两类转发，共用同一套引擎与界面：
+
+- **SSH 隧道**：把一个远端端口映射到本地，常用于安全地访问内网数据库、缓存等不对外暴露的服务
+- **FRP 客户端**：管理 frpc 配置，把本地服务通过 frps 暴露出去，适合内网穿透与多地点组网
 
 与上一版不同，本项目**不使用 WebView / Wails**：核心逻辑在 Go 里，界面是独立的 Flutter 桌面客户端（Windows / macOS / Linux 原生窗口）。隧道引擎有两种形态，客户端默认使用**进程内引擎**：
 
@@ -20,7 +23,8 @@
 Flutter 客户端（原生窗口）
   ├── 进程内引擎（默认） ── dart:ffi ────▶  Go 动态库（同一进程）
   └── 独立 daemon        ── HTTP / WS ──▶  Go daemon（仅监听 127.0.0.1）
-                                                    └── SSH ──▶  远端主机
+                                                    ├── SSH ──▶  远端主机
+                                                    └── frpc ─▶  frps
 ```
 
 两种形态复用同一套业务逻辑（`daemon/internal/app`），参数校验、返回结构与事件格式完全一致，因此可以随时互换：
@@ -29,18 +33,21 @@ Flutter 客户端（原生窗口）
 - **界面可独立演进**：换 UI 技术栈不影响隧道逻辑
 - **多进程可选**：需要隧道脱离界面常驻时，改用独立 daemon
 
+FRP 部分把 [fatedier/frp](https://github.com/fatedier/frp) 作为库加载进同一个进程，不额外分发 frpc 可执行文件，也不为每份配置派生新进程。
+
 ## 目录结构
 
 ```
-ssh-tunnel/
+portway/
 ├── daemon/                    # Go 侧：业务逻辑 + 两种对外形态
-│   ├── cmd/ssh-tunnel/        # 独立 daemon 入口
-│   ├── cmd/libssh-tunnel/     # 进程内引擎入口（buildmode=c-shared）
+│   ├── cmd/portway-daemon/     # 独立 daemon 入口
+│   ├── cmd/portway-engine/    # 进程内引擎入口（buildmode=c-shared）
 │   ├── internal/
 │   │   ├── app/               # 业务门面：隧道、配置、密钥、日志缓冲
 │   │   ├── embedded/          # 进程内引擎：包装 app，导出 FFI 符号
 │   │   ├── server/            # HTTP API 与 WebSocket Hub
 │   │   ├── config/            # 配置解析与读写
+│   │   ├── frp/               # FRP 客户端：配置读写与 frpc 运行时
 │   │   ├── manager/           # 多隧道管理
 │   │   ├── tunnel/            # 单隧道：SSH 连接与端口转发
 │   │   └── logger/            # 日志
@@ -49,13 +56,14 @@ ssh-tunnel/
 └── client/                    # Flutter 桌面客户端
     └── lib/
         ├── models.dart
+        ├── models/frp.dart    # FRP 客户端与代理模型
         ├── providers.dart     # 状态管理：挑选引擎形态并建立连接
         ├── services/
         │   ├── tunnel_engine.dart    # 引擎接口：两种实现的共同契约
         │   ├── embedded_engine.dart  # 进程内引擎（dart:ffi）
         │   ├── daemon_client.dart    # 独立 daemon（HTTP + WebSocket）
         │   └── daemon_discovery.dart # 服务发现（仅 daemon 模式）
-        ├── pages/             # 隧道 / SSH 连接 / 密钥 / 日志
+        ├── pages/             # 隧道 / SSH 连接 / FRP / 密钥 / 日志
         └── widgets.dart
 ```
 
@@ -65,8 +73,8 @@ ssh-tunnel/
 
 ```bash
 cd daemon
-go build -o bin/ssh-tunnel-daemon.exe ./cmd/ssh-tunnel
-./bin/ssh-tunnel-daemon.exe -config ssh-tunnel.toml
+go build -o bin/portway-daemon.exe ./cmd/portway-daemon
+./bin/portway-daemon.exe -config portway.toml
 ```
 
 首次运行会在配置路径不存在时自动创建一份最小配置。
@@ -77,16 +85,16 @@ go build -o bin/ssh-tunnel-daemon.exe ./cmd/ssh-tunnel
 
 ```bash
 # 用户级自启：随当前用户登录启动，无需管理员权限（桌面场景推荐）
-ssh-tunnel-daemon autostart enable -config ~/.ssh-tunnel/config.toml
-ssh-tunnel-daemon autostart status
-ssh-tunnel-daemon autostart disable
+portway-daemon autostart enable -config ~/.ssh-tunnel/config.toml
+portway-daemon autostart status
+portway-daemon autostart disable
 
 # 系统服务：无需登录即可运行、崩溃自动重启，但需要管理员/root 权限
-ssh-tunnel-daemon service install -config ~/.ssh-tunnel/config.toml
-ssh-tunnel-daemon service start
-ssh-tunnel-daemon service status
-ssh-tunnel-daemon service stop
-ssh-tunnel-daemon service uninstall
+portway-daemon service install -config ~/.ssh-tunnel/config.toml
+portway-daemon service start
+portway-daemon service status
+portway-daemon service stop
+portway-daemon service uninstall
 ```
 
 | | 用户级自启 | 系统服务 |
@@ -125,8 +133,8 @@ daemon 启动后会把连接信息写到发现文件：
 设置 `SSH_TUNNEL_DATA_DIR` 可显式指定目录，daemon 与客户端都会以它为准（无需是管理员权限，便于自定义部署）：
 
 ```bash
-SSH_TUNNEL_DATA_DIR=/opt/ssh-tunnel-data ssh-tunnel-daemon
-SSH_TUNNEL_DATA_DIR=/opt/ssh-tunnel-data ./ssh_tunnel_client
+SSH_TUNNEL_DATA_DIR=/opt/ssh-tunnel-data portway-daemon
+SSH_TUNNEL_DATA_DIR=/opt/ssh-tunnel-data ./portway
 ```
 
 > 系统公共服务目录下的发现文件以 `0755` / `0644` 权限写入，因为服务进程以 LocalSystem / root 运行，而客户端以普通用户身份读取。该文件包含访问令牌，因此同机其他用户也能读到它——在单用户机器上无碍，多用户机器上若不希望其他用户控制隧道，请改用用户级自启。
@@ -137,7 +145,7 @@ SSH_TUNNEL_DATA_DIR=/opt/ssh-tunnel-data ./ssh_tunnel_client
 
 ```bash
 cd daemon
-go build -buildmode=c-shared -o bin/ssh-tunnel.dll ./cmd/libssh-tunnel
+go build -buildmode=c-shared -o bin/portway.dll ./cmd/portway-engine
 ```
 
 Windows 上 c-shared 需要 C 工具链，脚本会自动查找仓库内的
@@ -147,7 +155,7 @@ Windows 上 c-shared 需要 C 工具链，脚本会自动查找仓库内的
 pwsh scripts/build_engine.ps1 -Version 1.2.3
 ```
 
-macOS / Linux 分别产出 `libssh-tunnel.dylib` / `libssh-tunnel.so`，用同一个脚本即可。
+macOS / Linux 分别产出 `libportway.dylib` / `libportway.so`，用同一个脚本即可。
 没有 C 工具链时：Windows 装 mingw-w64（winlibs / MSYS2），macOS 执行
 `xcode-select --install`，Linux 装 `build-essential`。
 
@@ -165,9 +173,9 @@ flutter run -d windows        # 或 macos / linux
 → 从客户端位置向上查找仓库里的 `daemon/bin/`。找到就加载进程内引擎；找不到则回退到
 发现并连接独立 daemon。
 
-daemon 模式下：若 daemon 未运行，且客户端旁带有 `ssh-tunnel-daemon.exe`（发布版已随程序分发），
+daemon 模式下：若 daemon 未运行，且客户端旁带有 `portway-daemon.exe`（发布版已随程序分发），
 客户端会**自动拉起它**并等待就绪；仅用 `flutter run` 调试时，会自动向上查找源码仓库里的
-`daemon/bin/ssh-tunnel-daemon.exe`。拉起后 daemon 独立常驻：关闭或退出客户端都不影响隧道。
+`daemon/bin/portway-daemon.exe`。拉起后 daemon 独立常驻：关闭或退出客户端都不影响隧道。
 WebSocket 连接恢复后，客户端会自动同步完整隧道列表与运行状态，包括离线期间的增删改。
 
 ### 3b. 引擎形态与切换
@@ -188,13 +196,13 @@ daemon 显示「已连接 http://127.0.0.1:<端口> · 用户进程 / 系统服�
 
 ```bash
 # 强制使用独立 daemon（例如动态库加载失败时绕过）
-SSH_TUNNEL_ENGINE=daemon ./ssh_tunnel_client
+SSH_TUNNEL_ENGINE=daemon ./portway
 
 # 强制使用进程内引擎
-SSH_TUNNEL_ENGINE=embedded ./ssh_tunnel_client
+SSH_TUNNEL_ENGINE=embedded ./portway
 
 # 开发时直接指向构建产物
-SSH_TUNNEL_EMBEDDED_LIB=/path/to/ssh-tunnel.dll ./ssh_tunnel_client
+SSH_TUNNEL_EMBEDDED_LIB=/path/to/portway.dll ./portway
 ```
 
 不设置 `SSH_TUNNEL_ENGINE` 时：动态库存在就用进程内引擎，否则用 daemon。
@@ -289,6 +297,56 @@ proxy_jump = ["prod-server"]
 
 `proxy_jump` 可设置在 SSH 连接或直连隧道上，按顺序引用 SSH 连接名称；编辑器中每行填写一个名称。引用连接自身的跳板链会展开，重复、循环、缺失引用以及超过 8 跳的链会被拒绝。每个跳板使用自身的认证和主机校验配置；连接超时覆盖完整链，停止隧道时会关闭所有跳板。反向监听是否允许由远端 SSH 服务的转发策略决定。
 
+## FRP 代理
+
+「FRP」页管理 frpc 客户端：每个客户端对应一份**frp 原生 TOML** 配置，放在 `<配置目录>/frp/clients/<名称>.toml`（默认 `<用户主目录>/.ssh-tunnel/frp/clients/`，随工作区变化）。文件内容就是 frpc 自己的配置格式，因此可以直接交给官方 frpc 使用；反过来，手工写的 frpc 配置放进这个目录也会出现在列表里。
+
+```toml
+serverAddr = "frps.example.com"
+serverPort = 7000
+
+[auth]
+method = "token"
+token = "your-token"
+
+[transport.tls]
+enable = true
+
+# 界面用的元数据写在 frp 原生字段里，不新增私有段
+[metadatas]
+mgrGroup = "生产"
+
+[[proxies]]
+name = "mysql"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 3306
+remotePort = 13306
+```
+
+界面上没有暴露的字段（OIDC、transport 细节、插件与健康检查参数等）在编辑其它字段时**原样保留**，不会被抹掉。
+
+### 启停与热更新
+
+- 客户端可以单独启停；`metadatas.mgrAutoStart`（默认为真）决定引擎启动时是否自动拉起它
+- 代理的增删改与启用开关走 frp 的**热更新**通道：与 frps 的连接保持不变，改动随即生效
+- 服务器地址、认证方式、TLS 这类影响连接本身的改动会重启该客户端，改其它字段不会
+- 服务器暂时不可达时客户端保持运行并重试，不会自行退出：卡片显示「运行中」，代理显示「连接中」
+- 直接用编辑器改配置文件也会被列出来，但**运行中的客户端不会自动重读**：改完点一次「重启」即可
+
+### 代理类型
+
+| 类型 | 用途 | 界面字段 |
+|---|---|---|
+| `tcp` / `udp` | 把本地服务暴露到 frps 的远端端口 | 本地地址、本地端口、远端端口（留空或填 0 表示由服务端分配） |
+| `http` / `https` / `tcpmux` | 按域名路由到本地服务 | 本地地址、本地端口、自定义域名、子域名 |
+
+访问端（`stcp` / `xtcp` / `sudp` 的 visitor）会被列出并可以启停、删除，但暂不支持在界面上编辑。
+
+### 日志
+
+frp 自身的日志并入「日志」页，每条带客户端名前缀（形如 `[<客户端名>] ...`），可直接按名字过滤。日志级别由「设置」页的全局级别统一控制。
+
 ## 客户端托盘
 
 关闭窗口时会弹出确认（可在「设置」页改成默认直接收进托盘或直接退出），可选：
@@ -341,9 +399,9 @@ daemon 在 Windows 上监听系统唤醒、地址和路由变化，并在各平�
 ## 命令行
 
 ```
-ssh-tunnel-daemon                      前台运行
-ssh-tunnel-daemon autostart <动作>     用户级开机自启
-ssh-tunnel-daemon service <动作>       系统服务托管
+portway-daemon                      前台运行
+portway-daemon autostart <动作>     用户级开机自启
+portway-daemon service <动作>       系统服务托管
 ```
 
 `autostart` 动作：`enable` / `disable` / `status`
@@ -382,6 +440,13 @@ ssh-tunnel-daemon service <动作>       系统服务托管
 | GET | `/api/keys/stat?path=<路径>` | 校验私钥路径对 daemon 是否可读 |
 | POST | `/api/keys/unlock` | 使用 `path`、`passphrase` 解锁私钥，口令不保存 |
 | POST | `/api/keys/lock` | 锁定 `path` 对应的内存私钥 |
+| GET | `/api/frp/clients` | FRP 客户端列表（含各自的代理与运行状态） |
+| POST | `/api/frp/clients` | 新建 FRP 客户端 |
+| PUT/DELETE | `/api/frp/clients/{name}` | 更新 / 删除 FRP 客户端 |
+| POST | `/api/frp/clients/{name}/start`\|`stop`\|`restart` | 启停单个客户端 |
+| POST | `/api/frp/clients/{name}/proxies` | 新增代理 |
+| PUT/DELETE | `/api/frp/clients/{name}/proxies/{proxy}` | 更新 / 删除代理（改名也走 PUT） |
+| POST | `/api/frp/clients/{name}/proxies/{proxy}/toggle` | `enabled` 为真/假；走热更新，不重连 |
 | GET | `/api/logs` | 日志缓冲 |
 | GET | `/api/status` | 所有隧道的运行状态（`{名称: 是否运行}`） |
 | POST | `/api/update/shutdown` | 升级助手携带当前 `pid` 请求退出；仅允许有 token 的用户进程，系统服务拒绝此操作 |
@@ -401,9 +466,10 @@ WebSocket 事件格式：
 ```json
 {"type": "status", "status": {"mysql-prod": true}}
 {"type": "log", "log": {"timestamp": "...", "level": "info", "message": "...", "tunnel": "mysql-prod"}}
+{"type": "frp_snapshot", "frp_snapshot": [{"name": "prod-frpc", "running": true, "proxies": []}]}
 ```
 
-每次连接或重连 `/ws` 时，daemon 会主动发送 `snapshot` 事件，其 `snapshot` 字段与 `/api/tunnels` 的完整列表格式相同（没有隧道时为 `[]`），随后发送兼容旧客户端的 `status` 事件。配置增删改及重新加载也会推送快照；周期状态广播仍只在状态变化时发送。
+每次连接或重连 `/ws` 时，daemon 会主动发送 `snapshot` 事件，其 `snapshot` 字段与 `/api/tunnels` 的完整列表格式相同（没有隧道时为 `[]`），随后发送兼容旧客户端的 `status` 事件；FRP 列表以 `frp_snapshot` 单独推送，结构与 `/api/frp/clients` 相同。配置增删改及重新加载也会推送快照；周期状态广播仍只在状态变化时发送（FRP 的代理连接状态由 frp 自行推进，因此也靠这条轮询兜底）。
 
 `runtime` 事件以隧道名为键，包含 `is_running`、`desired_running`、`state`、`last_error`、`retry_count`、`connected_at`；这些字段也包含在列表快照中。`is_running` 表示运行任务仍存活，`desired_running` 表示用户仍希望保持连接（包括重试耗尽后等待网络变化恢复），`state=connected` 表示 SSH 连接和转发监听均已建立。详细状态变化最多在下一次 2 秒轮询时推送。
 
@@ -438,7 +504,7 @@ go test ./...
 
 # 进程内引擎动态库（c-shared；需要 C 工具链）
 pwsh ../scripts/build_engine.ps1          # Windows
-# go build -buildmode=c-shared -o bin/libssh-tunnel.so ./cmd/libssh-tunnel  # Linux / macOS
+# go build -buildmode=c-shared -o bin/libportway.so ./cmd/portway-engine  # Linux / macOS
 
 # client：依赖、静态检查、测试
 cd client
@@ -473,8 +539,8 @@ scripts/build_windows.bat [版本号]
 
 产物在 `dist/`：
 
-- `ssh-tunnel-setup-<版本>.exe` —— Inno Setup 安装程序
-- `ssh-tunnel-portable-<版本>.zip` —— 便携版，解压即用
+- `portway-setup-<版本>.exe` —— Inno Setup 安装程序
+- `portway-portable-<版本>.zip` —— 便携版，解压即用
 
 步骤：`flutter build windows --release` → 构建进程内引擎动态库并拷入客户端发布目录
 （同目录是客户端加载引擎的前提）→ `go build` daemon 并拷入同一目录（回退引擎，同时供
@@ -516,9 +582,9 @@ git push origin v1.2.3
 
 | 平台 | 产物 |
 |---|---|
-| Windows | `ssh-tunnel-setup-<版本>.exe`（安装包）+ `ssh-tunnel-portable-<版本>.zip`（便携版） |
-| Linux | `ssh-tunnel-portable-<版本>-linux-x64.tar.gz` |
-| macOS | `ssh-tunnel-portable-<版本>-macos-<arch>.zip`（跟随 runner 架构，arm64 / amd64） |
+| Windows | `portway-setup-<版本>.exe`（安装包）+ `portway-portable-<版本>.zip`（便携版） |
+| Linux | `portway-portable-<版本>-linux-x64.tar.gz` |
+| macOS | `portway-portable-<版本>-macos-<arch>.zip`（跟随 runner 架构，arm64 / amd64） |
 
 > macOS 为 ad-hoc 签名、未公证，分发给其它 Mac 首次需右键「打开」绕过 Gatekeeper；
 > 正式分发建议补上 Developer ID 签名与 notarization。
@@ -527,11 +593,11 @@ Linux 便携版需要系统提供 GTK 3、Ayatana AppIndicator（或 AppIndicato
 
 ### 检查更新与便携升级
 
-「设置 → 版本与升级」可以手动检查稳定版或包含预发布的渠道。版本按语义版本比较，构建元数据不影响排序；开发和 CI 构建会说明无法比较。检查使用本地随包工具，不依赖当前选中的 daemon。发布来源由 GitHub Actions 的 `GITHUB_REPOSITORY` 注入，支持 fork；本地构建默认使用 `byteporter/ssh-tunnel`。
+「设置 → 版本与升级」可以手动检查稳定版或包含预发布的渠道。版本按语义版本比较，构建元数据不影响排序；开发和 CI 构建会说明无法比较。检查使用本地随包工具，不依赖当前选中的 daemon。发布来源由 GitHub Actions 的 `GITHUB_REPOSITORY` 注入，支持 fork；本地构建默认使用 `zcpin/portway`。
 
 下载会匹配 Windows x64、Linux x64 或 macOS amd64/arm64 产物，并验证该 Release 的 `SHA256SUMS-*`。未通过大小或 SHA256 校验的文件不会用于安装。下载保存在系统用户缓存目录的 `ssh-tunnel/updates/` 下，界面可以打开对应目录。GitHub 仓库不可用、请求限流或缺少匹配产物时会显示错误。
 
-正式便携包带有 `ssh-tunnel-portable.json`（macOS 位于 `.app/Contents/MacOS/`），安装器不包含此文件。确认「升级便携版」后，工具再次校验包、版本、仓库与平台，并在安装目录旁展开新版本；助手从独立缓存目录运行，等待客户端退出，停止此安装的用户 daemon，然后备份并替换整个程序目录。所有用户配置及工作区保留在原位置，原有 daemon 按原配置重新启动。安装目录内存在用户配置时会拒绝自动替换，需先迁移到用户目录。
+正式便携包带有 `portway-portable.json`（macOS 位于 `.app/Contents/MacOS/`），安装器不包含此文件。确认「升级便携版」后，工具再次校验包、版本、仓库与平台，并在安装目录旁展开新版本；助手从独立缓存目录运行，等待客户端退出，停止此安装的用户 daemon，然后备份并替换整个程序目录。所有用户配置及工作区保留在原位置，原有 daemon 按原配置重新启动。安装目录内存在用户配置时会拒绝自动替换，需先迁移到用户目录。
 
 新程序会在首帧后向助手确认启动。替换或启动失败会恢复原程序；原程序备份位于安装目录旁的 `.ssh-tunnel-backup-*`。结果和助手日志保留在缓存的 `apply-*/` 目录，设置页也会显示上次结果。该检查覆盖启动阶段；运行后发现业务问题仍可退出程序后手动恢复备份。备份和失败的暂存目录不自动清理。
 
@@ -540,19 +606,19 @@ Linux 便携版需要系统提供 GTK 3、Ayatana AppIndicator（或 AppIndicato
 命令行也可检查和下载（输出 JSON）：
 
 ```powershell
-.\ssh-tunnel-daemon.exe update info
-.\ssh-tunnel-daemon.exe update check -channel stable
-.\ssh-tunnel-daemon.exe update download -tag v1.2.3 -kind portable
+.\portway-daemon.exe update info
+.\portway-daemon.exe update check -channel stable
+.\portway-daemon.exe update download -tag v1.2.3 -kind portable
 ```
 
 `update prepare`、`launch`、`apply` 为客户端与外部助手的内部协议；`mark-portable` 仅由构建脚本在完整 bundle 内调用。CI 在 Linux 运行竞态检查，并在 Windows/macOS 运行临时夹具升级测试。
 
 安装程序为**按用户安装**（无需管理员权限），安装到
-`%LOCALAPPDATA%\Programs\SSH Tunnel Manager`，创建开始菜单与桌面快捷方式。
+`%LOCALAPPDATA%\Programs\Portway`，创建开始菜单与桌面快捷方式。
 卸载时会移除指向本安装目录的用户级自启动项；指向其他安装目录的条目会保留。用户目录 `~/.ssh-tunnel/` 中的配置与服务发现文件会保留。
 
 需要管理员级（Program Files）安装时，把 `installer.iss` 里的
-`PrivilegesRequired=lowest` 改为 `admin`、`DefaultDirName` 改为 `{autopf}\SSH Tunnel Manager` 即可。
+`PrivilegesRequired=lowest` 改为 `admin`、`DefaultDirName` 改为 `{autopf}\Portway` 即可。
 
 ## 已知限制
 
@@ -562,3 +628,7 @@ Linux 便携版需要系统提供 GTK 3、Ayatana AppIndicator（或 AppIndicato
 - 系统服务模式下发现文件需对所有本地用户可读，令牌因此对本机其他用户可见（详见「服务发现的候选位置」）
 - 私钥以明文路径记录，不做复制；daemon 以运行身份读取该文件，因此权限需对运行身份开放（系统服务模式下是 LocalSystem / root）
 - Windows 构建需要带 `PROGRAMFILES` 系列环境变量的终端环境（VS Build Tools）
+- **FRP 只管理 frpc**：frps（服务端）的配置与运行不在范围内
+- **FRP 不做流量统计**：frpc 侧的 frp 库不提供流量数据，界面只展示代理的连接状态、远端地址与错误
+- **FRP 访问端暂不可编辑**：`stcp` / `xtcp` / `sudp` 的 visitor 在界面上只能启停与删除
+- 嵌入 frp 库会让进程内引擎动态库增大约 13 MB（纯 Go 依赖，不需要额外的 C 工具链）

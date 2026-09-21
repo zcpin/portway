@@ -9,6 +9,7 @@ import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart' show visibleForTesting;
 
 import '../models.dart';
+import '../models/frp.dart';
 import '../models/tunnel_diagnostic.dart';
 import 'tunnel_engine.dart';
 
@@ -31,6 +32,9 @@ typedef _HandleTextDart = Pointer<Utf8> Function(int, Pointer<Utf8>);
 
 typedef _HandleTextTextNative = Pointer<Utf8> Function(Int64, Pointer<Utf8>, Pointer<Utf8>);
 typedef _HandleTextTextDart = Pointer<Utf8> Function(int, Pointer<Utf8>, Pointer<Utf8>);
+
+typedef _HandleTextTextTextNative = Pointer<Utf8> Function(Int64, Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>);
+typedef _HandleTextTextTextDart = Pointer<Utf8> Function(int, Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>);
 
 typedef _SetHandlerNative = Pointer<Utf8> Function(Int64, Pointer<NativeFunction<_EventCallbackNative>>);
 typedef _SetHandlerDart = Pointer<Utf8> Function(int, Pointer<NativeFunction<_EventCallbackNative>>);
@@ -55,14 +59,18 @@ class EngineException implements Exception {
 ///
 /// 之所以要这个可传递的数据结构：耗时调用会被放到临时 isolate 上执行，
 /// 而 isolate 之间只能传值，因此不携带任何闭包或原生资源。
+///
+/// 参数按顺序给出，最多三个——目前只有 FRP 的「更新代理」用满三个
+/// （客户端名、原代理名、新配置）。
 class _EngineCall {
-  const _EngineCall(this.libraryPath, this.handle, this.symbol, [this.arg1, this.arg2]);
+  const _EngineCall(this.libraryPath, this.handle, this.symbol, [this.arg1, this.arg2, this.arg3]);
 
   final String libraryPath;
   final int handle;
   final String symbol;
   final String? arg1;
   final String? arg2;
+  final String? arg3;
 }
 
 /// 执行一次引擎调用，返回原始 JSON 响应。
@@ -73,28 +81,32 @@ String _invokeEngine(_EngineCall call) {
   final library = DynamicLibrary.open(call.libraryPath);
   final freeString = library.lookupFunction<_FreeNative, _FreeDart>('sshtunnel_free_string');
 
+  final args = <String>[
+    if (call.arg1 != null) call.arg1!,
+    if (call.arg2 != null) call.arg2!,
+    if (call.arg3 != null) call.arg3!,
+  ];
+
+  final allocated = <Pointer<Utf8>>[];
   Pointer<Utf8> result;
-  if (call.arg2 != null) {
-    final arg1 = call.arg1!.toNativeUtf8();
-    final arg2 = call.arg2!.toNativeUtf8();
-    try {
-      final invoke = library.lookupFunction<_HandleTextTextNative, _HandleTextTextDart>(call.symbol);
-      result = invoke(call.handle, arg1, arg2);
-    } finally {
-      malloc.free(arg1);
-      malloc.free(arg2);
+  try {
+    for (final arg in args) {
+      allocated.add(arg.toNativeUtf8());
     }
-  } else if (call.arg1 != null) {
-    final arg1 = call.arg1!.toNativeUtf8();
-    try {
-      final invoke = library.lookupFunction<_HandleTextNative, _HandleTextDart>(call.symbol);
-      result = invoke(call.handle, arg1);
-    } finally {
-      malloc.free(arg1);
+
+    result = switch (allocated.length) {
+      0 => library.lookupFunction<_HandleNative, _HandleDart>(call.symbol)(call.handle),
+      1 => library.lookupFunction<_HandleTextNative, _HandleTextDart>(call.symbol)(call.handle, allocated[0]),
+      2 => library
+          .lookupFunction<_HandleTextTextNative, _HandleTextTextDart>(call.symbol)(call.handle, allocated[0], allocated[1]),
+      3 => library.lookupFunction<_HandleTextTextTextNative, _HandleTextTextTextDart>(call.symbol)(
+          call.handle, allocated[0], allocated[1], allocated[2]),
+      _ => throw ArgumentError('引擎调用最多支持 3 个字符串参数，收到 ${allocated.length} 个'),
+    };
+  } finally {
+    for (final pointer in allocated) {
+      malloc.free(pointer);
     }
-  } else {
-    final invoke = library.lookupFunction<_HandleNative, _HandleDart>(call.symbol);
-    result = invoke(call.handle);
   }
 
   // 先在原生内存释放前把内容复制到 Dart 侧。
@@ -146,9 +158,9 @@ class EmbeddedEngine implements TunnelEngine {
 
   /// 动态库文件名，各平台与 Go 的 `-buildmode=c-shared` 产物一致。
   static String get libraryFileName {
-    if (Platform.isWindows) return 'ssh-tunnel.dll';
-    if (Platform.isMacOS) return 'libssh-tunnel.dylib';
-    return 'libssh-tunnel.so';
+    if (Platform.isWindows) return 'portway.dll';
+    if (Platform.isMacOS) return 'libportway.dylib';
+    return 'libportway.so';
   }
 
   /// 显式指定动态库位置，便于开发时用 `flutter run` 直接指向构建产物。
@@ -536,6 +548,71 @@ class EmbeddedEngine implements TunnelEngine {
   @override
   Future<void> lockKey(String path) async {
     _check(await _invokeInBackground(_EngineCall(_libraryPath, _handle, 'sshtunnel_lock_key', path)));
+  }
+
+  // ---------- FRP ----------
+
+  @override
+  Future<List<FrpClient>> getFrpClients() async {
+    final data = _check(_invoke(_EngineCall(_libraryPath, _handle, 'sshtunnel_frp_clients')));
+    return (data as List).map((row) => FrpClient.fromJson((row as Map).cast<String, dynamic>())).toList();
+  }
+
+  @override
+  Future<void> addFrpClient(FrpClientPayload client) async {
+    _check(await _invokeInBackground(
+        _EngineCall(_libraryPath, _handle, 'sshtunnel_frp_add_client', jsonEncode(client.toJson()))));
+  }
+
+  @override
+  Future<void> updateFrpClient(String name, FrpClientPayload client) async {
+    _check(await _invokeInBackground(
+        _EngineCall(_libraryPath, _handle, 'sshtunnel_frp_update_client', name, jsonEncode(client.toJson()))));
+  }
+
+  @override
+  Future<void> deleteFrpClient(String name) async {
+    _check(await _invokeInBackground(_EngineCall(_libraryPath, _handle, 'sshtunnel_frp_delete_client', name)));
+  }
+
+  @override
+  Future<void> startFrpClient(String name) async {
+    _check(await _invokeInBackground(_EngineCall(_libraryPath, _handle, 'sshtunnel_frp_start_client', name)));
+  }
+
+  @override
+  Future<void> stopFrpClient(String name) async {
+    // 停止会等待 frp 关闭连接，放到后台执行，避免卡住界面。
+    _check(await _invokeInBackground(_EngineCall(_libraryPath, _handle, 'sshtunnel_frp_stop_client', name)));
+  }
+
+  @override
+  Future<void> restartFrpClient(String name) async {
+    _check(await _invokeInBackground(_EngineCall(_libraryPath, _handle, 'sshtunnel_frp_restart_client', name)));
+  }
+
+  @override
+  Future<void> addFrpProxy(String client, FrpProxyPayload proxy) async {
+    _check(await _invokeInBackground(
+        _EngineCall(_libraryPath, _handle, 'sshtunnel_frp_add_proxy', client, jsonEncode(proxy.toJson()))));
+  }
+
+  @override
+  Future<void> updateFrpProxy(String client, String proxy, FrpProxyPayload payload) async {
+    _check(await _invokeInBackground(_EngineCall(
+        _libraryPath, _handle, 'sshtunnel_frp_update_proxy', client, proxy, jsonEncode(payload.toJson()))));
+  }
+
+  @override
+  Future<void> deleteFrpProxy(String client, String proxy) async {
+    _check(await _invokeInBackground(
+        _EngineCall(_libraryPath, _handle, 'sshtunnel_frp_delete_proxy', client, proxy)));
+  }
+
+  @override
+  Future<void> toggleFrpProxy(String client, String proxy, bool enabled) async {
+    _check(await _invokeInBackground(_EngineCall(
+        _libraryPath, _handle, 'sshtunnel_frp_toggle_proxy', client, proxy, jsonEncode({'enabled': enabled}))));
   }
 
   // ---------- 日志与配置 ----------

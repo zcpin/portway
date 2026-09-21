@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/byteporter/ssh-tunnel/internal/config"
+	"github.com/byteporter/portway/internal/config"
 )
 
 func diagnosticTunnel(t *testing.T, server *relayTestServer, mode string) *Tunnel {

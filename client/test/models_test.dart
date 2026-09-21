@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ssh_tunnel_client/models.dart';
+import 'package:portway/models.dart';
 
 void main() {
   test('daemon 明确运行方式覆盖目录推断并保留可执行路径', () {

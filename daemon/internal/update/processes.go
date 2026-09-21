@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/byteporter/ssh-tunnel/internal/discovery"
+	"github.com/byteporter/portway/internal/discovery"
 )
 
 func localRequest(ctx context.Context, info discovery.Info, method, endpoint string, body io.Reader) error {

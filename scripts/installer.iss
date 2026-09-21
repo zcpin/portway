@@ -1,4 +1,4 @@
-﻿; SSH 隧道管理器 —— Windows 安装程序（Inno Setup 6）
+﻿; 端口通（Portway）—— Windows 安装程序（Inno Setup 6）
 ; 用法：ISCC /DAppVersion=1.0.0 scripts\installer.iss
 ; 由 scripts\build_windows.bat 调用，也可单独运行。
 
@@ -15,9 +15,9 @@
   #define AppBundleDir "..\client\build\windows\x64\runner\Release"
 #endif
 
-#define MyAppName "SSH 隧道管理器"
-#define MyAppExe "ssh_tunnel_client.exe"
-#define MyAppDaemon "ssh-tunnel-daemon.exe"
+#define MyAppName "端口通"
+#define MyAppExe "portway.exe"
+#define MyAppDaemon "portway-daemon.exe"
 
 [Setup]
 ; GUID 需全局唯一，首次定稿后不要再改
@@ -26,12 +26,12 @@ AppName={#MyAppName}
 AppVersion={#AppVersion}
 VersionInfoVersion={#AppBuildName}.{#AppBuildNumber}
 AppPublisher=byteporter
-DefaultDirName={localappdata}\Programs\SSH Tunnel Manager
+DefaultDirName={localappdata}\Programs\Portway
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 OutputDir=..\dist
-OutputBaseFilename=ssh-tunnel-setup-{#AppVersion}
+OutputBaseFilename=portway-setup-{#AppVersion}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -47,7 +47,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
 ; 发布目录包含：客户端 exe、Flutter 运行库 data\、daemon exe、示例配置。
-Source: "{#AppBundleDir}\*"; DestDir: "{app}"; Excludes: "ssh-tunnel-portable.json"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#AppBundleDir}\*"; DestDir: "{app}"; Excludes: "portway-portable.json"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExe}"

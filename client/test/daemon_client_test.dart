@@ -2,8 +2,8 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ssh_tunnel_client/models.dart';
-import 'package:ssh_tunnel_client/services/daemon_client.dart';
+import 'package:portway/models.dart';
+import 'package:portway/services/daemon_client.dart';
 
 class _DirectConnections extends HttpOverrides {
   @override

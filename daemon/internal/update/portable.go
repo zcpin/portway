@@ -15,7 +15,7 @@ import (
 	"strings"
 )
 
-const markerName = "ssh-tunnel-portable.json"
+const markerName = "portway-portable.json"
 
 // LockRunningExecutable prevents replacement while any daemon from a portable
 // bundle is alive, including services or unlisted custom discovery directories.
@@ -60,11 +60,11 @@ type Installation struct {
 func layout(platform string) (client, daemon, marker string) {
 	switch platform {
 	case "windows":
-		return "ssh_tunnel_client.exe", "ssh-tunnel-daemon.exe", markerName
+		return "portway.exe", "portway-daemon.exe", markerName
 	case "darwin":
-		return filepath.Join("Contents", "MacOS", "ssh_tunnel_client"), filepath.Join("Contents", "MacOS", "ssh-tunnel-daemon"), filepath.Join("Contents", "MacOS", markerName)
+		return filepath.Join("Contents", "MacOS", "portway"), filepath.Join("Contents", "MacOS", "portway-daemon"), filepath.Join("Contents", "MacOS", markerName)
 	default:
-		return "ssh_tunnel_client", "ssh-tunnel-daemon", markerName
+		return "portway", "portway-daemon", markerName
 	}
 }
 
@@ -241,7 +241,7 @@ func Prepare(ctx context.Context, executable, version, repository, cache string,
 		return result, err
 	}
 	if runtime.GOOS == "darwin" {
-		stage = filepath.Join(stage, "ssh_tunnel_client.app")
+		stage = filepath.Join(stage, "portway.app")
 	}
 	nextManifest := manifest{1, input.Download.Version, repository, runtime.GOOS, runtime.GOARCH}
 	if err := validateBundle(stage, nextManifest); err != nil {

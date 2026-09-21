@@ -22,7 +22,7 @@ $utf8 = [Text.UTF8Encoding]::new($false)
 # Compile the real installer using harmless payload fixtures, without running it.
 $bundleDirectory = Join-Path $testDirectory 'bundle'
 [IO.Directory]::CreateDirectory($bundleDirectory) | Out-Null
-foreach ($name in @('ssh_tunnel_client.exe', 'ssh-tunnel-daemon.exe')) {
+foreach ($name in @('portway.exe', 'portway-daemon.exe')) {
     [IO.File]::WriteAllText((Join-Path $bundleDirectory $name), 'fixture', $utf8)
 }
 & $CompilerPath '/Qp' "/O$testDirectory" "/DAppBundleDir=$bundleDirectory" (Join-Path $PSScriptRoot 'installer.iss')

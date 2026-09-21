@@ -3,8 +3,8 @@ package manager
 import (
 	"context"
 
-	"github.com/byteporter/ssh-tunnel/internal/config"
-	"github.com/byteporter/ssh-tunnel/internal/tunnel"
+	"github.com/byteporter/portway/internal/config"
+	"github.com/byteporter/portway/internal/tunnel"
 )
 
 func (m *Manager) UnlockKey(path string, passphrase []byte) error {

@@ -25,18 +25,18 @@ function InitializeSetup(): Boolean;
 var
   InstalledExe, ResultFile: String;
 begin
-  InstalledExe := 'C:\Apps\SSH Tunnel Manager\ssh-tunnel-daemon.exe';
+  InstalledExe := 'C:\Apps\Portway\portway-daemon.exe';
   CheckMatch('quoted current path', '"' + InstalledExe + '" -hide-console', InstalledExe, True);
   CheckMatch('no arguments', '"' + InstalledExe + '"', InstalledExe, True);
-  CheckMatch('case insensitive', '"c:\apps\ssh tunnel manager\SSH-TUNNEL-DAEMON.EXE"', InstalledExe, True);
-  CheckMatch('forward slashes', '"C:/Apps/SSH Tunnel Manager/ssh-tunnel-daemon.exe"', InstalledExe, True);
-  CheckMatch('path normalization', '"C:\Apps\other\..\SSH Tunnel Manager\ssh-tunnel-daemon.exe"', InstalledExe, True);
-  CheckMatch('unquoted path', 'C:\Apps\Tunnel\ssh-tunnel-daemon.exe -hide-console', 'C:\Apps\Tunnel\ssh-tunnel-daemon.exe', True);
-  CheckMatch('other installation', '"D:\Tools\ssh-tunnel-daemon.exe"', InstalledExe, False);
-  CheckMatch('similar directory', '"C:\Apps\SSH Tunnel Manager-old\ssh-tunnel-daemon.exe"', InstalledExe, False);
-  CheckMatch('similar executable', '"C:\Apps\SSH Tunnel Manager\ssh-tunnel-daemon.exe.old"', InstalledExe, False);
+  CheckMatch('case insensitive', '"c:\apps\portway\PORTWAY-DAEMON.EXE"', InstalledExe, True);
+  CheckMatch('forward slashes', '"C:/Apps/Portway/portway-daemon.exe"', InstalledExe, True);
+  CheckMatch('path normalization', '"C:\Apps\other\..\Portway\portway-daemon.exe"', InstalledExe, True);
+  CheckMatch('unquoted path', 'C:\Apps\Tunnel\portway-daemon.exe -hide-console', 'C:\Apps\Tunnel\portway-daemon.exe', True);
+  CheckMatch('other installation', '"D:\Tools\portway-daemon.exe"', InstalledExe, False);
+  CheckMatch('similar directory', '"C:\Apps\Portway-old\portway-daemon.exe"', InstalledExe, False);
+  CheckMatch('similar executable', '"C:\Apps\Portway\portway-daemon.exe.old"', InstalledExe, False);
   CheckMatch('argument mentions current path', 'C:\Tools\other.exe "' + InstalledExe + '"', InstalledExe, False);
-  CheckMatch('relative command', 'ssh-tunnel-daemon.exe -hide-console', InstalledExe, False);
+  CheckMatch('relative command', 'portway-daemon.exe -hide-console', InstalledExe, False);
   CheckMatch('missing quote', '"' + InstalledExe, InstalledExe, False);
   CheckMatch('invalid quoted suffix', '"' + InstalledExe + '".other', InstalledExe, False);
   CheckMatch('empty command', '', InstalledExe, False);

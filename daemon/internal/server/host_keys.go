@@ -3,7 +3,7 @@ package server
 import (
 	"net/http"
 
-	"github.com/byteporter/ssh-tunnel/internal/config"
+	"github.com/byteporter/portway/internal/config"
 )
 
 func (s *Server) handleInspectHostKey(w http.ResponseWriter, r *http.Request) {

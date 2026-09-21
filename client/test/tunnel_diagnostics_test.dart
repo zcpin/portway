@@ -7,14 +7,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ssh_tunnel_client/connection_preferences_provider.dart';
-import 'package:ssh_tunnel_client/models.dart';
-import 'package:ssh_tunnel_client/models/connection_preferences.dart';
-import 'package:ssh_tunnel_client/models/tunnel_diagnostic.dart';
-import 'package:ssh_tunnel_client/pages/tunnel_diagnostics.dart';
-import 'package:ssh_tunnel_client/pages/tunnels_page.dart';
-import 'package:ssh_tunnel_client/providers.dart';
-import 'package:ssh_tunnel_client/services/daemon_client.dart';
+import 'package:portway/connection_preferences_provider.dart';
+import 'package:portway/models.dart';
+import 'package:portway/models/connection_preferences.dart';
+import 'package:portway/models/tunnel_diagnostic.dart';
+import 'package:portway/pages/tunnel_diagnostics.dart';
+import 'package:portway/pages/tunnels_page.dart';
+import 'package:portway/providers.dart';
+import 'package:portway/services/daemon_client.dart';
 
 const _info = DaemonInfo(
   host: '127.0.0.1',
