@@ -36,9 +36,9 @@ func fixturePlan(t *testing.T) Plan {
 	p := Plan{
 		Current: manifest{1, "v1.0.0", "owner/repo", runtime.GOOS, runtime.GOARCH},
 		Next:    manifest{1, "v2.0.0", "owner/repo", runtime.GOOS, runtime.GOARCH},
-		Root:    filepath.Join(dir, "installed"), Stage: filepath.Join(dir, ".ssh-tunnel-stage-test", "bundle"),
-		Directory: filepath.Join(dir, "cache", "apply-test"), Backup: filepath.Join(dir, ".ssh-tunnel-backup-test"),
-		Failed: filepath.Join(dir, ".ssh-tunnel-failed-test"), ClientPID: os.Getpid() + 1,
+		Root:    filepath.Join(dir, "installed"), Stage: filepath.Join(dir, ".portway-stage-test", "bundle"),
+		Directory: filepath.Join(dir, "cache", "apply-test"), Backup: filepath.Join(dir, ".portway-backup-test"),
+		Failed: filepath.Join(dir, ".portway-failed-test"), ClientPID: os.Getpid() + 1,
 	}
 	p.Helper = filepath.Join(p.Directory, "helper")
 	if err := os.MkdirAll(p.Directory, 0700); err != nil {

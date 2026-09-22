@@ -85,12 +85,12 @@ go build -o bin/portway-daemon.exe ./cmd/portway-daemon
 
 ```bash
 # 用户级自启：随当前用户登录启动，无需管理员权限（桌面场景推荐）
-portway-daemon autostart enable -config ~/.ssh-tunnel/config.toml
+portway-daemon autostart enable -config ~/.portway/config.toml
 portway-daemon autostart status
 portway-daemon autostart disable
 
 # 系统服务：无需登录即可运行、崩溃自动重启，但需要管理员/root 权限
-portway-daemon service install -config ~/.ssh-tunnel/config.toml
+portway-daemon service install -config ~/.portway/config.toml
 portway-daemon service start
 portway-daemon service status
 portway-daemon service stop
@@ -103,7 +103,7 @@ portway-daemon service uninstall
 | 运行身份 | 当前用户 | LocalSystem / root |
 | 未登录时运行 | 否 | 是 |
 | 崩溃自动重启 | 否 | 是 |
-| 服务发现文件 | `~/.ssh-tunnel/daemon.json` | 系统公共目录（Windows 为 `%ProgramData%\ssh-tunnel`） |
+| 服务发现文件 | `~/.portway/daemon.json` | 系统公共目录（Windows 为 `%ProgramData%\portway`） |
 
 > 两种方式的运行身份不同，服务发现文件也会写到不同位置。客户端会**依次检查全部候选位置并校验 token**，取第一个通过认证的实例；地址无效、进程已退出或 token 已过期的条目都会被跳过。
 
@@ -116,7 +116,7 @@ daemon 启动后会把连接信息写到发现文件：
   "token": "c480cb03...",
   "pid": 43224,
   "version": "dev",
-  "config_path": "/home/me/.ssh-tunnel/config.toml"
+  "config_path": "/home/me/.portway/config.toml"
 }
 ```
 
@@ -126,15 +126,15 @@ daemon 启动后会把连接信息写到发现文件：
 
 | 顺序 | 位置 | 何时写入 |
 |---|---|---|
-| 1 | `$SSH_TUNNEL_DATA_DIR/daemon.json` | 显式指定时（见下） |
-| 2 | `<用户主目录>/.ssh-tunnel/daemon.json` | 前台运行 / 用户级自启 |
-| 3 | Windows：`%ProgramData%\ssh-tunnel\daemon.json`<br>Linux / macOS：`/var/lib/ssh-tunnel/daemon.json` | 系统服务模式 |
+| 1 | `$PORTWAY_DATA_DIR/daemon.json` | 显式指定时（见下） |
+| 2 | `<用户主目录>/.portway/daemon.json` | 前台运行 / 用户级自启 |
+| 3 | Windows：`%ProgramData%\portway\daemon.json`<br>Linux / macOS：`/var/lib/portway/daemon.json` | 系统服务模式 |
 
-设置 `SSH_TUNNEL_DATA_DIR` 可显式指定目录，daemon 与客户端都会以它为准（无需是管理员权限，便于自定义部署）：
+设置 `PORTWAY_DATA_DIR` 可显式指定目录，daemon 与客户端都会以它为准（无需是管理员权限，便于自定义部署）：
 
 ```bash
-SSH_TUNNEL_DATA_DIR=/opt/ssh-tunnel-data portway-daemon
-SSH_TUNNEL_DATA_DIR=/opt/ssh-tunnel-data ./portway
+PORTWAY_DATA_DIR=/opt/portway-data portway-daemon
+PORTWAY_DATA_DIR=/opt/portway-data ./portway
 ```
 
 > 系统公共服务目录下的发现文件以 `0755` / `0644` 权限写入，因为服务进程以 LocalSystem / root 运行，而客户端以普通用户身份读取。该文件包含访问令牌，因此同机其他用户也能读到它——在单用户机器上无碍，多用户机器上若不希望其他用户控制隧道，请改用用户级自启。
@@ -169,7 +169,7 @@ cd client
 flutter run -d windows        # 或 macos / linux
 ```
 
-客户端启动时先找动态库：`SSH_TUNNEL_EMBEDDED_LIB` 指定的路径 → 客户端可执行文件同目录
+客户端启动时先找动态库：`PORTWAY_EMBEDDED_LIB` 指定的路径 → 客户端可执行文件同目录
 → 从客户端位置向上查找仓库里的 `daemon/bin/`。找到就加载进程内引擎；找不到则回退到
 发现并连接独立 daemon。
 
@@ -196,26 +196,26 @@ daemon 显示「已连接 http://127.0.0.1:<端口> · 用户进程 / 系统服�
 
 ```bash
 # 强制使用独立 daemon（例如动态库加载失败时绕过）
-SSH_TUNNEL_ENGINE=daemon ./portway
+PORTWAY_ENGINE=daemon ./portway
 
 # 强制使用进程内引擎
-SSH_TUNNEL_ENGINE=embedded ./portway
+PORTWAY_ENGINE=embedded ./portway
 
 # 开发时直接指向构建产物
-SSH_TUNNEL_EMBEDDED_LIB=/path/to/portway.dll ./portway
+PORTWAY_EMBEDDED_LIB=/path/to/portway.dll ./portway
 ```
 
-不设置 `SSH_TUNNEL_ENGINE` 时：动态库存在就用进程内引擎，否则用 daemon。
+不设置 `PORTWAY_ENGINE` 时：动态库存在就用进程内引擎，否则用 daemon。
 
 > 进程内引擎与界面同进程，**客户端退出即隧道停止**，也没有「系统服务」这一形态；
 > 托盘收进托盘不会停掉隧道，只有真正退出程序才会。工作区在进程内模式下映射为一份配置文件，
 > 每个工作区是一个独立实例。
 
-顶部实例菜单可以选择自动发现的 daemon，或创建独立工作区。工作区配置与发现文件放在 `~/.ssh-tunnel/workspaces/<工作区标识>/`，名称和当前选择保存在 `~/.ssh-tunnel/workspaces.json`。新工作区从空配置启动，可再从「设置」导入配置。选定实例离线时保持该选择；需要切换时可手动选择其他实例或「自动选择实例」。切换会关闭旧客户端连接并重新加载列表、密钥、日志和设置，不停止原 daemon 的隧道。
+顶部实例菜单可以选择自动发现的 daemon，或创建独立工作区。工作区配置与发现文件放在 `~/.portway/workspaces/<工作区标识>/`，名称和当前选择保存在 `~/.portway/workspaces.json`。新工作区从空配置启动，可再从「设置」导入配置。选定实例离线时保持该选择；需要切换时可手动选择其他实例或「自动选择实例」。切换会关闭旧客户端连接并重新加载列表、密钥、日志和设置，不停止原 daemon 的隧道。
 
 ### 3. 配置隧道
 
-复制 `daemon/ssh-tunnel.example.toml` 为 `ssh-tunnel.toml`，或在客户端界面中添加 SSH 连接与隧道。
+复制 `daemon/portway.example.toml` 为 `portway.toml`，或在客户端界面中添加 SSH 连接与隧道。
 
 隧道可引用已有 SSH 连接，也可手动填写 SSH 主机、用户和私钥路径。编辑已有配置时会保留 `host_key_check`、`known_hosts_file` 和私钥路径；重连策略可选择「跟随全局设置」，重连间隔留空也会保留全局继承。
 
@@ -245,7 +245,7 @@ remote_port = 3306
 ```
 
 > 重连字段（`reconnect_strategy` / `reconnect_interval` / `max_reconnect_attempts`）可以省略：
-> 此时使用**全局默认值**，见 `ssh-tunnel.example.toml` 顶部注释，或在客户端「设置」页里修改。
+> 此时使用**全局默认值**，见 `portway.example.toml` 顶部注释，或在客户端「设置」页里修改。
 
 启动后即可连接本地端口：
 
@@ -299,7 +299,7 @@ proxy_jump = ["prod-server"]
 
 ## FRP 代理
 
-「FRP」页管理 frpc 客户端：每个客户端对应一份**frp 原生 TOML** 配置，放在 `<配置目录>/frp/clients/<名称>.toml`（默认 `<用户主目录>/.ssh-tunnel/frp/clients/`，随工作区变化）。文件内容就是 frpc 自己的配置格式，因此可以直接交给官方 frpc 使用；反过来，手工写的 frpc 配置放进这个目录也会出现在列表里。
+「FRP」页管理 frpc 客户端：每个客户端对应一份**frp 原生 TOML** 配置，放在 `<配置目录>/frp/clients/<名称>.toml`（默认 `<用户主目录>/.portway/frp/clients/`，随工作区变化）。文件内容就是 frpc 自己的配置格式，因此可以直接交给官方 frpc 使用；反过来，手工写的 frpc 配置放进这个目录也会出现在列表里。
 
 ```toml
 serverAddr = "frps.example.com"
@@ -368,7 +368,7 @@ daemon 在 Windows 上监听系统唤醒、地址和路由变化，并在各平�
 
 点击隧道卡片的星标可收藏，收藏会排在列表前面；「仅看收藏」可筛选常用隧道。卡片菜单中的「上移 / 下移」调整当前可见列表中的顺序，收藏和普通隧道分别排序。托盘增加收藏入口，并使用相同的固定顺序。
 
-收藏、顺序和打开方式保存在 `~/.ssh-tunnel/connection_preferences.json`，按 daemon 配置文件路径隔离。重启 daemon、更换端口或令牌不会丢失偏好；在编辑器中改名会同步迁移对应偏好。偏好文件读取失败时保留原文件，可修复后点击刷新重新读取。
+收藏、顺序和打开方式保存在 `~/.portway/connection_preferences.json`，按 daemon 配置文件路径隔离。重启 daemon、更换端口或令牌不会丢失偏好；在编辑器中改名会同步迁移对应偏好。偏好文件读取失败时保留原文件，可修复后点击刷新重新读取。
 
 以下快捷键在隧道页面生效（macOS 用 `⌘` 代替 `Ctrl`）：
 
@@ -388,7 +388,7 @@ daemon 在 Windows 上监听系统唤醒、地址和路由变化，并在各平�
 左侧导航除隧道管理外，还有「设置」与「关于」两个页面：
 
 - **设置**：
-  - 关闭窗口行为的默认动作（客户端本地偏好，存于 `~/.ssh-tunnel/client_settings.json`）
+  - 关闭窗口行为的默认动作（客户端本地偏好，存于 `~/.portway/client_settings.json`）
   - 隧道重连的**全局默认值**（重连策略 / 间隔 / 最大次数 / 日志级别），写入 daemon 配置，
     未单独配置这些字段的隧道回退使用；保存后受影响的运行中隧道会重启以应用新配置
   - 日志级别在保存或重新加载配置成功后立即生效；无效写入请求会在保存前被拒绝，写盘失败会保留原配置和运行状态
@@ -595,11 +595,11 @@ Linux 便携版需要系统提供 GTK 3、Ayatana AppIndicator（或 AppIndicato
 
 「设置 → 版本与升级」可以手动检查稳定版或包含预发布的渠道。版本按语义版本比较，构建元数据不影响排序；开发和 CI 构建会说明无法比较。检查使用本地随包工具，不依赖当前选中的 daemon。发布来源由 GitHub Actions 的 `GITHUB_REPOSITORY` 注入，支持 fork；本地构建默认使用 `zcpin/portway`。
 
-下载会匹配 Windows x64、Linux x64 或 macOS amd64/arm64 产物，并验证该 Release 的 `SHA256SUMS-*`。未通过大小或 SHA256 校验的文件不会用于安装。下载保存在系统用户缓存目录的 `ssh-tunnel/updates/` 下，界面可以打开对应目录。GitHub 仓库不可用、请求限流或缺少匹配产物时会显示错误。
+下载会匹配 Windows x64、Linux x64 或 macOS amd64/arm64 产物，并验证该 Release 的 `SHA256SUMS-*`。未通过大小或 SHA256 校验的文件不会用于安装。下载保存在系统用户缓存目录的 `portway/updates/` 下，界面可以打开对应目录。GitHub 仓库不可用、请求限流或缺少匹配产物时会显示错误。
 
 正式便携包带有 `portway-portable.json`（macOS 位于 `.app/Contents/MacOS/`），安装器不包含此文件。确认「升级便携版」后，工具再次校验包、版本、仓库与平台，并在安装目录旁展开新版本；助手从独立缓存目录运行，等待客户端退出，停止此安装的用户 daemon，然后备份并替换整个程序目录。所有用户配置及工作区保留在原位置，原有 daemon 按原配置重新启动。安装目录内存在用户配置时会拒绝自动替换，需先迁移到用户目录。
 
-新程序会在首帧后向助手确认启动。替换或启动失败会恢复原程序；原程序备份位于安装目录旁的 `.ssh-tunnel-backup-*`。结果和助手日志保留在缓存的 `apply-*/` 目录，设置页也会显示上次结果。该检查覆盖启动阶段；运行后发现业务问题仍可退出程序后手动恢复备份。备份和失败的暂存目录不自动清理。
+新程序会在首帧后向助手确认启动。替换或启动失败会恢复原程序；原程序备份位于安装目录旁的 `.portway-backup-*`。结果和助手日志保留在缓存的 `apply-*/` 目录，设置页也会显示上次结果。该检查覆盖启动阶段；运行后发现业务问题仍可退出程序后手动恢复备份。备份和失败的暂存目录不自动清理。
 
 自动升级需要安装目录及其父目录可写，且同一安装的其他客户端已退出。每个便携 daemon 在运行期间持有共享锁；仍有系统服务或未登记的实例使用该目录时会拒绝替换。安装版请下载并运行安装程序；系统服务需要先由服务管理器停止，再手动更新并重启。macOS GitHub 分发版本关闭 App Sandbox，以支持独立工作区、外部更新助手和普通用户目录访问；仍使用前述 ad-hoc 签名。
 
@@ -615,14 +615,14 @@ Linux 便携版需要系统提供 GTK 3、Ayatana AppIndicator（或 AppIndicato
 
 安装程序为**按用户安装**（无需管理员权限），安装到
 `%LOCALAPPDATA%\Programs\Portway`，创建开始菜单与桌面快捷方式。
-卸载时会移除指向本安装目录的用户级自启动项；指向其他安装目录的条目会保留。用户目录 `~/.ssh-tunnel/` 中的配置与服务发现文件会保留。
+卸载时会移除指向本安装目录的用户级自启动项；指向其他安装目录的条目会保留。用户目录 `~/.portway/` 中的配置与服务发现文件会保留。
 
 需要管理员级（Program Files）安装时，把 `installer.iss` 里的
 `PrivilegesRequired=lowest` 改为 `admin`、`DefaultDirName` 改为 `{autopf}\Portway` 即可。
 
 ## 已知限制
 
-- 同一发现位置只允许一个 daemon 实例（`daemon.json` 为单文件，后启动的会覆盖）；需要并行多实例时用 `SSH_TUNNEL_DATA_DIR` 各自指定目录
+- 同一发现位置只允许一个 daemon 实例（`daemon.json` 为单文件，后启动的会覆盖）；需要并行多实例时用 `PORTWAY_DATA_DIR` 各自指定目录
 - 进程内引擎在**同一进程内只能有一个实例**：日志级别与日志钩子是包级全局状态，多实例会互相覆盖。切换工作区时客户端会先关闭旧引擎再创建新的，因此切换瞬间隧道会短暂中断
 - 进程内引擎的**诊断**无法中途取消：关闭诊断窗口后，引擎里的检查仍会跑到超时为止（daemon 模式下会随请求一起取消）
 - 系统服务模式下发现文件需对所有本地用户可读，令牌因此对本机其他用户可见（详见「服务发现的候选位置」）

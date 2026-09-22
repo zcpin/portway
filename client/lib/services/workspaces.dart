@@ -38,7 +38,7 @@ class WorkspaceStore {
   static String _defaultDirectory() {
     final home = DaemonDiscovery.homeDir;
     if (home == null || home.isEmpty) throw StateError('无法确定工作区存储目录');
-    return '$home${Platform.pathSeparator}.ssh-tunnel';
+    return '$home${Platform.pathSeparator}.portway';
   }
 
   Future<WorkspacePreferences> load() async {

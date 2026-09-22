@@ -151,7 +151,7 @@ func safeInstallRoot(root string) error {
 	if home, err := os.UserHomeDir(); err == nil && samePath(root, home) {
 		return errors.New("cannot replace the user home directory")
 	}
-	for _, name := range []string{".git", "go.mod", "pubspec.yaml", "unins000.exe", "config.toml", "ssh-tunnel.toml", ".ssh-tunnel"} {
+	for _, name := range []string{".git", "go.mod", "pubspec.yaml", "unins000.exe", "config.toml", "portway.toml", ".portway"} {
 		if _, err := os.Lstat(filepath.Join(root, name)); !os.IsNotExist(err) {
 			return fmt.Errorf("安装目录包含 %s；请使用专用便携目录，并将用户配置移至安装目录外。", name)
 		}
@@ -232,7 +232,7 @@ func Prepare(ctx context.Context, executable, version, repository, cache string,
 	if err != nil {
 		return result, err
 	}
-	stageDir, err := os.MkdirTemp(filepath.Dir(install.Root), ".ssh-tunnel-stage-")
+	stageDir, err := os.MkdirTemp(filepath.Dir(install.Root), ".portway-stage-")
 	if err != nil {
 		return result, fmt.Errorf("installation parent must be writable: %w", err)
 	}
@@ -254,7 +254,7 @@ func Prepare(ctx context.Context, executable, version, repository, cache string,
 	if err != nil {
 		return result, err
 	}
-	helper := filepath.Join(work, "ssh-tunnel-update")
+	helper := filepath.Join(work, "portway-update")
 	if runtime.GOOS == "windows" {
 		helper += ".exe"
 	}
@@ -265,8 +265,8 @@ func Prepare(ctx context.Context, executable, version, repository, cache string,
 	plan := Plan{
 		Current: manifest{1, version, repository, runtime.GOOS, runtime.GOARCH}, Next: nextManifest,
 		Root: install.Root, Stage: stage, Directory: work, Helper: helper,
-		Backup:    filepath.Join(filepath.Dir(install.Root), ".ssh-tunnel-backup-"+suffix),
-		Failed:    filepath.Join(filepath.Dir(install.Root), ".ssh-tunnel-failed-"+suffix),
+		Backup:    filepath.Join(filepath.Dir(install.Root), ".portway-backup-"+suffix),
+		Failed:    filepath.Join(filepath.Dir(install.Root), ".portway-failed-"+suffix),
 		ClientPID: input.ClientPID, Instances: instances, TreeSHA256: digest,
 	}
 	planPath := filepath.Join(work, "plan.json")
@@ -397,10 +397,10 @@ func (p Plan) validate() error {
 	parent := filepath.Dir(p.Root)
 	rel, err := filepath.Rel(parent, p.Stage)
 	parts := strings.Split(rel, string(filepath.Separator))
-	if err != nil || len(parts) < 2 || !strings.HasPrefix(parts[0], ".ssh-tunnel-stage-") || within(p.Root, p.Stage) || within(p.Root, p.Directory) || within(p.Directory, p.Root) {
+	if err != nil || len(parts) < 2 || !strings.HasPrefix(parts[0], ".portway-stage-") || within(p.Root, p.Stage) || within(p.Root, p.Directory) || within(p.Directory, p.Root) {
 		return errors.New("update staging/helper directories are not isolated")
 	}
-	for target, prefix := range map[string]string{p.Backup: ".ssh-tunnel-backup-", p.Failed: ".ssh-tunnel-failed-"} {
+	for target, prefix := range map[string]string{p.Backup: ".portway-backup-", p.Failed: ".portway-failed-"} {
 		if !samePath(filepath.Dir(target), parent) || !strings.HasPrefix(filepath.Base(target), prefix) {
 			return errors.New("backup and rollback paths must be siblings of the installation")
 		}

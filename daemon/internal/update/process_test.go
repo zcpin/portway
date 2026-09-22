@@ -20,12 +20,12 @@ import (
 // The test binary doubles as a small desktop process and HTTP daemon fixture. Every
 // executable, discovery file, config, and PID record stays in temporary fixtures.
 func TestMain(m *testing.M) {
-	mode := os.Getenv("SSH_TUNNEL_UPDATER_FIXTURE")
+	mode := os.Getenv("PORTWAY_UPDATER_FIXTURE")
 	if mode == "" {
 		os.Exit(m.Run())
 	}
 	if len(os.Args) > 2 && os.Args[1] == "update" {
-		_ = os.WriteFile(filepath.Join(os.Getenv("SSH_TUNNEL_UPDATER_PID_DIR"), strconv.Itoa(os.Getpid())+".pid"), []byte("helper"), 0600)
+		_ = os.WriteFile(filepath.Join(os.Getenv("PORTWAY_UPDATER_PID_DIR"), strconv.Itoa(os.Getpid())+".pid"), []byte("helper"), 0600)
 		if err := Run(os.Args[2:], "v1.0.0", "owner/repo", os.Stdin, os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
@@ -46,7 +46,7 @@ func TestMain(m *testing.M) {
 		fmt.Println(metadata.Version)
 		return
 	}
-	pidDir := os.Getenv("SSH_TUNNEL_UPDATER_PID_DIR")
+	pidDir := os.Getenv("PORTWAY_UPDATER_PID_DIR")
 	if err := os.WriteFile(filepath.Join(pidDir, strconv.Itoa(os.Getpid())+".pid"), []byte(executable), 0600); err != nil {
 		os.Exit(3)
 	}
@@ -89,12 +89,12 @@ func TestMain(m *testing.M) {
 	if mode == "exit" || (mode == "fail-next" && metadata.Version == "v2.0.0") {
 		os.Exit(5)
 	}
-	if address := os.Getenv("SSH_TUNNEL_UPDATE_ADDRESS"); address != "" {
+	if address := os.Getenv("PORTWAY_UPDATE_ADDRESS"); address != "" {
 		conn, err := net.DialTimeout("tcp", address, time.Second)
 		if err != nil {
 			os.Exit(6)
 		}
-		_, _ = conn.Write([]byte(os.Getenv("SSH_TUNNEL_UPDATE_TOKEN")))
+		_, _ = conn.Write([]byte(os.Getenv("PORTWAY_UPDATE_TOKEN")))
 		_ = conn.Close()
 	}
 	for {
@@ -109,10 +109,10 @@ func fixtureProcesses(t *testing.T, mode string) (Plan, string) {
 	if err := os.Mkdir(pidDir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("SSH_TUNNEL_UPDATER_FIXTURE", mode)
-	t.Setenv("SSH_TUNNEL_UPDATER_PID_DIR", pidDir)
-	t.Setenv("SSH_TUNNEL_UPDATE_ADDRESS", "")
-	t.Setenv("SSH_TUNNEL_UPDATE_TOKEN", "")
+	t.Setenv("PORTWAY_UPDATER_FIXTURE", mode)
+	t.Setenv("PORTWAY_UPDATER_PID_DIR", pidDir)
+	t.Setenv("PORTWAY_UPDATE_ADDRESS", "")
+	t.Setenv("PORTWAY_UPDATE_TOKEN", "")
 	t.Cleanup(func() {
 		files, _ := filepath.Glob(filepath.Join(pidDir, "*.pid"))
 		for _, file := range files {

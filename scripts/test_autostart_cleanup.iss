@@ -1,7 +1,7 @@
 [Setup]
 AppName=SSH Tunnel autostart matching tests
 AppVersion=1.0.0
-DefaultDirName={tmp}\ssh-tunnel-autostart-tests
+DefaultDirName={tmp}\portway-autostart-tests
 CreateAppDir=no
 Uninstallable=no
 PrivilegesRequired=lowest

@@ -7,7 +7,7 @@
 #
 #  客户端启动时会在自己的可执行文件同目录查找这个库；开发时也可以
 #  用环境变量直接指定：
-#      $env:SSH_TUNNEL_EMBEDDED_LIB = 'C:\path\to\portway.dll'
+#      $env:PORTWAY_EMBEDDED_LIB = 'C:\path\to\portway.dll'
 #
 #  用法：
 #      pwsh scripts/build_engine.ps1 [-Version 1.2.3] [-Toolchain <gcc 路径>]

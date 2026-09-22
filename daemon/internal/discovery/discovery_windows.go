@@ -13,5 +13,5 @@ func sharedPath() (string, error) {
 	if dir == "" {
 		dir = `C:\ProgramData`
 	}
-	return filepath.Join(dir, "ssh-tunnel", FileName), nil
+	return filepath.Join(dir, "portway", FileName), nil
 }

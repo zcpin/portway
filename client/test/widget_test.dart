@@ -22,7 +22,7 @@ void main() {
           discoveryProvider.overrideWith((ref) async => []),
           workspacesProvider.overrideWith(_EmptyWorkspaces.new),
         ],
-        child: const SshTunnelApp(),
+        child: const PortwayApp(),
       ),
     );
     await tester.pump();

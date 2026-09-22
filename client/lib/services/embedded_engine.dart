@@ -164,7 +164,7 @@ class EmbeddedEngine implements TunnelEngine {
   }
 
   /// 显式指定动态库位置，便于开发时用 `flutter run` 直接指向构建产物。
-  static const envLibraryPath = 'SSH_TUNNEL_EMBEDDED_LIB';
+  static const envLibraryPath = 'PORTWAY_EMBEDDED_LIB';
 
   /// 进程内指定动态库位置，优先级高于 [envLibraryPath]。
   ///
@@ -209,7 +209,7 @@ class EmbeddedEngine implements TunnelEngine {
   /// 加载动态库、创建引擎并启动隧道。
   ///
   /// [configPath] 为空时由引擎按默认规则查找配置
-  /// （`ssh-tunnel.toml` / `config.toml` / `~/.ssh-tunnel/config.toml`）。
+  /// （`portway.toml` / `config.toml` / `~/.portway/config.toml`）。
   static Future<EmbeddedEngine> launch({String? configPath}) async {
     final libraryPath = resolveLibraryPath();
     if (libraryPath == null) {

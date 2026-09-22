@@ -25,7 +25,7 @@ class ConnectionPreferencesStore {
   static String _defaultDirectory() {
     final home = DaemonDiscovery.homeDir;
     if (home == null || home.isEmpty) throw StateError('无法确定客户端偏好目录');
-    return '$home${Platform.pathSeparator}.ssh-tunnel';
+    return '$home${Platform.pathSeparator}.portway';
   }
 
   Future<Map<String, ConnectionPreferences>> _loadAll() async {

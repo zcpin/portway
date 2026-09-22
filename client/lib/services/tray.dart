@@ -102,7 +102,7 @@ class AppTray with TrayListener {
     );
     final file = File(
       '${Directory.systemTemp.path}${Platform.pathSeparator}'
-      'ssh_tunnel_tray_icon_${_fnv1a(bytes).toRadixString(16)}$suffix',
+      'portway_tray_icon_${_fnv1a(bytes).toRadixString(16)}$suffix',
     );
     if (!await file.exists()) {
       await file.writeAsBytes(bytes);

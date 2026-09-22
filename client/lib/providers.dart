@@ -78,7 +78,7 @@ final instanceAvailabilityProvider = FutureProvider<Map<String, bool>>((ref) asy
 ///      都没有时自动拉起随客户端打包的 daemon（见 [DaemonLauncher]）。
 ///
 /// 动态库不存在或加载失败时会回退到 daemon 模式，这样 `flutter run` 等开发场景
-/// 不必先编译引擎库。可用 `SSH_TUNNEL_ENGINE=daemon` 强制使用 daemon。
+/// 不必先编译引擎库。可用 `PORTWAY_ENGINE=daemon` 强制使用 daemon。
 ///
 /// daemon 模式连接成功后定期探活：daemon 重启会更换端口与 token，旧客户端的所有
 /// 认证请求都会失败，此时自动重新发现并重建客户端；未连接时定期重试。
@@ -95,10 +95,10 @@ enum EngineMode { embedded, daemon }
 
 /// 解析应当使用的引擎形态。
 ///
-/// 默认在动态库可用时走进程内引擎；`SSH_TUNNEL_ENGINE=daemon` 可强制回退，
+/// 默认在动态库可用时走进程内引擎；`PORTWAY_ENGINE=daemon` 可强制回退，
 /// 便于对比两种模式或在动态库异常时绕过。
 EngineMode resolveEngineMode() {
-  final forced = Platform.environment['SSH_TUNNEL_ENGINE']?.trim().toLowerCase();
+  final forced = Platform.environment['PORTWAY_ENGINE']?.trim().toLowerCase();
   if (forced == 'daemon') return EngineMode.daemon;
   if (forced == 'embedded') return EngineMode.embedded;
   return EmbeddedEngine.isAvailable ? EngineMode.embedded : EngineMode.daemon;

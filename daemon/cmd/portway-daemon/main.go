@@ -71,7 +71,7 @@ type commonFlags struct {
 func newFlagSet(name string) (*flag.FlagSet, *commonFlags) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	c := &commonFlags{}
-	fs.StringVar(&c.configPath, "config", "", "配置文件路径（默认按 ssh-tunnel.toml / config.toml / ~/.ssh-tunnel/config.toml 顺序查找）")
+	fs.StringVar(&c.configPath, "config", "", "配置文件路径（默认按 portway.toml / config.toml / ~/.portway/config.toml 顺序查找）")
 	fs.StringVar(&c.addr, "addr", "127.0.0.1:0", "监听地址，端口 0 表示由系统分配空闲端口")
 	fs.BoolVar(&c.noAuth, "no-auth", false, "关闭 token 认证（仅限本机可信环境）")
 	fs.StringVar(&c.logLevel, "log-level", "", "覆盖配置中的日志级别：debug/info/warn/error")
@@ -350,8 +350,8 @@ service 动作:
   -version            显示版本
 
 示例:
-  portway-daemon -config ~/.ssh-tunnel/config.toml
-  portway-daemon autostart enable -config ~/.ssh-tunnel/config.toml
-  portway-daemon service install -config ~/.ssh-tunnel/config.toml
+  portway-daemon -config ~/.portway/config.toml
+  portway-daemon autostart enable -config ~/.portway/config.toml
+  portway-daemon service install -config ~/.portway/config.toml
 `)
 }

@@ -10,7 +10,7 @@ import 'update_panel.dart';
 /// 左侧导航「设置」页。
 ///
 /// 包含两类配置：
-///   - 关闭窗口行为的默认动作（客户端本地，存于 ~/.ssh-tunnel/client_settings.json）
+///   - 关闭窗口行为的默认动作（客户端本地，存于 ~/.portway/client_settings.json）
 ///   - 隧道重连的全局默认值（daemon 配置，未单独设置的隧道回退使用）
 class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key, this.onQuitForUpdate});

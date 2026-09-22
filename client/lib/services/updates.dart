@@ -163,8 +163,8 @@ class UpdateService {
   /// startup to the helper; absent variables make ordinary launches a no-op.
   static Future<void> signalReady({Map<String, String>? environment}) async {
     final env = environment ?? Platform.environment;
-    final address = env['SSH_TUNNEL_UPDATE_ADDRESS'];
-    final token = env['SSH_TUNNEL_UPDATE_TOKEN'];
+    final address = env['PORTWAY_UPDATE_ADDRESS'];
+    final token = env['PORTWAY_UPDATE_TOKEN'];
     if (address == null ||
         token == null ||
         !RegExp(r'^[0-9a-f]{64}$').hasMatch(token)) {

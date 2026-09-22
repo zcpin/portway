@@ -7,7 +7,7 @@ void main() {
   late Directory tempDir;
 
   setUp(() {
-    tempDir = Directory.systemTemp.createTempSync('ssh_tunnel_settings_test_');
+    tempDir = Directory.systemTemp.createTempSync('portway_settings_test_');
   });
 
   tearDown(() {

@@ -15,7 +15,7 @@ if (-not $CompilerPath) {
 }
 if (-not $CompilerPath) { throw 'Inno Setup 6 compiler was not found.' }
 
-$testDirectory = Join-Path ([IO.Path]::GetTempPath()) ('ssh-tunnel-autostart-tests-' + [guid]::NewGuid().ToString('N'))
+$testDirectory = Join-Path ([IO.Path]::GetTempPath()) ('portway-autostart-tests-' + [guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($testDirectory) | Out-Null
 $utf8 = [Text.UTF8Encoding]::new($false)
 

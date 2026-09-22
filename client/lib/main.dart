@@ -59,12 +59,12 @@ void main() async {
   // 关闭窗口时收进托盘而不是退出，由 WindowListener 拦截关闭事件
   await windowManager.setPreventClose(true);
 
-  runApp(const ProviderScope(child: SshTunnelApp()));
+  runApp(const ProviderScope(child: PortwayApp()));
   WidgetsBinding.instance.addPostFrameCallback((_) { UpdateService.signalReady(); });
 }
 
-class SshTunnelApp extends StatelessWidget {
-  const SshTunnelApp({super.key});
+class PortwayApp extends StatelessWidget {
+  const PortwayApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -506,10 +506,10 @@ class _DaemonMissing extends ConsumerWidget {
                   embedded
                       ? 'cd daemon\n'
                         'go build -buildmode=c-shared -o bin/portway.dll ./cmd/portway-engine\n'
-                        '# 或强制回退：set SSH_TUNNEL_ENGINE=daemon'
+                        '# 或强制回退：set PORTWAY_ENGINE=daemon'
                       : 'cd daemon\n'
                         'go build -o bin/portway-daemon.exe ./cmd/portway-daemon\n'
-                        'bin/portway-daemon.exe -config ssh-tunnel.toml',
+                        'bin/portway-daemon.exe -config portway.toml',
                 ),
                 const SizedBox(height: 16),
                 FilledButton.icon(

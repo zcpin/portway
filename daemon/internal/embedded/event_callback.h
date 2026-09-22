@@ -1,5 +1,5 @@
-#ifndef SSH_TUNNEL_EVENT_CALLBACK_H
-#define SSH_TUNNEL_EVENT_CALLBACK_H
+#ifndef PORTWAY_EVENT_CALLBACK_H
+#define PORTWAY_EVENT_CALLBACK_H
 
 // 事件回调：引擎把一条事件 JSON 交给客户端。
 //

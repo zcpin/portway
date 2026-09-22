@@ -165,7 +165,7 @@ jobs:
         run: test "$(client/build/linux/x64/release/bundle/portway-daemon -version)" = "$VERSION"
 
       - name: Copy sample config
-        run: cp daemon/ssh-tunnel.example.toml client/build/linux/x64/release/bundle/
+        run: cp daemon/portway.example.toml client/build/linux/x64/release/bundle/
 
       - name: Mark portable bundle
         run: client/build/linux/x64/release/bundle/portway-daemon update mark-portable
@@ -233,7 +233,7 @@ jobs:
             -o "../$app/Contents/MacOS/portway-daemon" ./cmd/portway-daemon
 
       - name: Copy sample config
-        run: cp daemon/ssh-tunnel.example.toml client/build/macos/Build/Products/Release/portway.app/Contents/Resources/
+        run: cp daemon/portway.example.toml client/build/macos/Build/Products/Release/portway.app/Contents/Resources/
 
       - name: Mark portable bundle
         run: client/build/macos/Build/Products/Release/portway.app/Contents/MacOS/portway-daemon update mark-portable

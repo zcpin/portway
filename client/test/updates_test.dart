@@ -172,7 +172,7 @@ void main() {
 
   test('退出失败会取消已准备的助手，并保留原始错误', () async {
     final dir = await Directory.systemTemp.createTemp(
-      'ssh-tunnel-update-test-',
+      'portway-update-test-',
     );
     addTearDown(() => dir.delete(recursive: true));
     final cancelPath = '${dir.path}${Platform.pathSeparator}cancel';
@@ -224,15 +224,15 @@ void main() {
     final token = '0123456789abcdef' * 4;
     await UpdateService.signalReady(
       environment: {
-        'SSH_TUNNEL_UPDATE_ADDRESS': '127.0.0.1:${server.port}',
-        'SSH_TUNNEL_UPDATE_TOKEN': token,
+        'PORTWAY_UPDATE_ADDRESS': '127.0.0.1:${server.port}',
+        'PORTWAY_UPDATE_TOKEN': token,
       },
     );
     expect(await received.future.timeout(const Duration(seconds: 3)), token);
     await UpdateService.signalReady(
       environment: {
-        'SSH_TUNNEL_UPDATE_ADDRESS': 'example.com:443',
-        'SSH_TUNNEL_UPDATE_TOKEN': token,
+        'PORTWAY_UPDATE_ADDRESS': 'example.com:443',
+        'PORTWAY_UPDATE_TOKEN': token,
       },
     );
   });

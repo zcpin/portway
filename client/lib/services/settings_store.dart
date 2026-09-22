@@ -31,7 +31,7 @@ enum CloseAction {
 /// 这些设置只影响客户端自身行为（如关闭按钮的默认动作），不依赖 daemon，
 /// 因此存到用户目录下独立的 JSON 文件，daemon 不在线也能读写。
 class SettingsStore {
-  /// 默认实例：写入 `<用户主目录>/.ssh-tunnel/client_settings.json`。
+  /// 默认实例：写入 `<用户主目录>/.portway/client_settings.json`。
   static final SettingsStore instance = SettingsStore();
 
   SettingsStore() : _dataDir = null;
@@ -97,10 +97,10 @@ class SettingsStore {
     return '$base${Platform.pathSeparator}$_fileName';
   }
 
-  /// 默认目录：`<用户主目录>/.ssh-tunnel`。
+  /// 默认目录：`<用户主目录>/.portway`。
   static String? _defaultDir() {
     final home = DaemonDiscovery.homeDir;
     if (home == null || home.isEmpty) return null;
-    return '$home${Platform.pathSeparator}.ssh-tunnel';
+    return '$home${Platform.pathSeparator}.portway';
   }
 }

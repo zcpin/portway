@@ -11,7 +11,7 @@ dist/
 # 本地配置与运行时文件
 daemon/keys/
 daemon/*.toml
-!daemon/ssh-tunnel.example.toml
+!daemon/portway.example.toml
 
 # 依赖
 client/.pub-cache/

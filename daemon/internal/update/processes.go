@@ -235,8 +235,8 @@ func startInstalled(p Plan, root string, expected manifest, startClient bool) (e
 	cmd := exec.Command(filepath.Join(root, clientName))
 	cmd.Dir = root
 	cmd.Env = childEnvironment(map[string]string{
-		"SSH_TUNNEL_UPDATE_ADDRESS": listener.Addr().String(),
-		"SSH_TUNNEL_UPDATE_TOKEN":   token,
+		"PORTWAY_UPDATE_ADDRESS": listener.Addr().String(),
+		"PORTWAY_UPDATE_TOKEN":   token,
 	})
 	child, err := startChild(cmd)
 	if err != nil {

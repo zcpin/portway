@@ -31,7 +31,7 @@ func TestWriteUserPath(t *testing.T) {
 		t.Fatalf("Write: %v", err)
 	}
 
-	want := filepath.Join(home, ".ssh-tunnel", FileName)
+	want := filepath.Join(home, ".portway", FileName)
 	if path != want {
 		t.Fatalf("写入路径 = %q，期望 %q", path, want)
 	}
@@ -73,7 +73,7 @@ func TestWriteSharedPathUsesDataDirOverride(t *testing.T) {
 	}
 }
 
-// SSH_TUNNEL_DATA_DIR 属于显式指令，前台运行也应遵守。
+// PORTWAY_DATA_DIR 属于显式指令，前台运行也应遵守。
 func TestDataDirOverrideWinsOverForeground(t *testing.T) {
 	home := isolateHome(t)
 	dataDir := t.TempDir()
@@ -87,7 +87,7 @@ func TestDataDirOverrideWinsOverForeground(t *testing.T) {
 		t.Fatalf("写入路径 = %q，期望落在覆盖目录", path)
 	}
 
-	userPath := filepath.Join(home, ".ssh-tunnel", FileName)
+	userPath := filepath.Join(home, ".portway", FileName)
 	if _, err := os.Stat(userPath); !os.IsNotExist(err) {
 		t.Errorf("覆盖生效时不应再写用户目录: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestDataDirOverrideWinsOverForeground(t *testing.T) {
 
 func TestCandidatesOrderAndDedup(t *testing.T) {
 	home := isolateHome(t)
-	userPath := filepath.Join(home, ".ssh-tunnel", FileName)
+	userPath := filepath.Join(home, ".portway", FileName)
 
 	candidates := Candidates()
 	if len(candidates) != 2 {
@@ -104,11 +104,11 @@ func TestCandidatesOrderAndDedup(t *testing.T) {
 	if candidates[0] != userPath {
 		t.Errorf("首位候选应为用户目录，实际 %q", candidates[0])
 	}
-	if !strings.Contains(candidates[1], "ssh-tunnel") {
+	if !strings.Contains(candidates[1], "portway") {
 		t.Errorf("次位候选应为系统目录，实际 %q", candidates[1])
 	}
 
-	// SSH_TUNNEL_DATA_DIR 优先，且与系统级候选去重
+	// PORTWAY_DATA_DIR 优先，且与系统级候选去重
 	dataDir := t.TempDir()
 	t.Setenv(EnvDataDir, dataDir)
 	candidates = Candidates()
@@ -151,7 +151,7 @@ func TestSharedPathFallsBackToPlatformDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SharedPath: %v", err)
 	}
-	if !strings.HasSuffix(path, filepath.Join("ssh-tunnel", FileName)) {
+	if !strings.HasSuffix(path, filepath.Join("portway", FileName)) {
 		t.Errorf("系统级路径异常: %q", path)
 	}
 	if runtime.GOOS == "windows" && !strings.Contains(strings.ToLower(path), "programdata") {

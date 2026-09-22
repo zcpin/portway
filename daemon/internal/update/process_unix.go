@@ -27,7 +27,7 @@ func lockInstall(root string) (func(), error) {
 
 func lockDirectory(root, purpose string, shared bool) (func(), error) {
 	digest := sha256.Sum256([]byte(filepath.Clean(root)))
-	file, err := os.OpenFile(filepath.Join(filepath.Dir(root), fmt.Sprintf(".ssh-tunnel-%s-%x.lock", purpose, digest[:8])), os.O_CREATE|os.O_RDWR, 0600)
+	file, err := os.OpenFile(filepath.Join(filepath.Dir(root), fmt.Sprintf(".portway-%s-%x.lock", purpose, digest[:8])), os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return nil, err
 	}

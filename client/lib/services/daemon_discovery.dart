@@ -18,7 +18,7 @@ class DaemonCandidate {
 /// daemon 启动时会把 {host, port, token} 写到发现文件，客户端读取即可自动连接，
 /// 无需用户手工填写地址和令牌。写入位置取决于 daemon 的运行方式：
 ///
-///   - 用户级：`<用户主目录>/.ssh-tunnel/daemon.json` —— 前台运行或开机自启
+///   - 用户级：`<用户主目录>/.portway/daemon.json` —— 前台运行或开机自启
 ///   - 系统级：平台公共目录 —— 安装为系统服务时以 LocalSystem / root 运行，
 ///     此时 `os.UserHomeDir()` 指向的是服务账户目录，客户端按用户目录读不到
 ///
@@ -26,11 +26,11 @@ class DaemonCandidate {
 /// 这样做同时解决了另一个问题：daemon 被强制结束（或系统重启）时会残留
 /// 陈旧文件，只按优先级取第一个会让客户端一直连一个已经不存在的端口。
 class DaemonDiscovery {
-  static const _subDir = '.ssh-tunnel';
+  static const _subDir = '.portway';
   static const _fileName = 'daemon.json';
 
-  /// 显式指定发现文件所在目录，需与 daemon 侧的 `SSH_TUNNEL_DATA_DIR` 同名。
-  static const envDataDir = 'SSH_TUNNEL_DATA_DIR';
+  /// 显式指定发现文件所在目录，需与 daemon 侧的 `PORTWAY_DATA_DIR` 同名。
+  static const envDataDir = 'PORTWAY_DATA_DIR';
 
   /// 用户主目录路径。Windows 取 USERPROFILE，其他平台取 HOME。
   static String? get homeDir {
@@ -55,10 +55,10 @@ class DaemonDiscovery {
     if (Platform.isWindows) {
       final programData =
           Platform.environment['ProgramData'] ?? r'C:\ProgramData';
-      return _join(programData, 'ssh-tunnel', _fileName);
+      return _join(programData, 'portway', _fileName);
     }
     // Linux / macOS 的系统服务均由 root 运行，daemon 侧同样写这里
-    return _join('/var/lib', 'ssh-tunnel', _fileName);
+    return _join('/var/lib', 'portway', _fileName);
   }
 
   /// 候选位置，顺序即优先级：显式覆盖 → 用户级 → 系统级。
@@ -130,7 +130,7 @@ class DaemonDiscovery {
     }
   }
 
-  /// `SSH_TUNNEL_DATA_DIR` 的值，未设置时返回 null。
+  /// `PORTWAY_DATA_DIR` 的值，未设置时返回 null。
   static String? get _dataDirOverride {
     final raw = Platform.environment[envDataDir]?.trim();
     return (raw == null || raw.isEmpty) ? null : raw;

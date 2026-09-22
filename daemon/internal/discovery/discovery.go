@@ -2,13 +2,13 @@
 //
 // 存在两个候选位置：
 //
-//   - 用户级：<home>/.ssh-tunnel/daemon.json —— 以当前用户身份运行时使用
+//   - 用户级：<home>/.portway/daemon.json —— 以当前用户身份运行时使用
 //   - 系统级：平台公共目录 —— 以系统服务身份（LocalSystem / root）运行时使用，
 //     此时 os.UserHomeDir() 指向的是服务账户目录，客户端按用户目录读不到
 //
 // 客户端会依次尝试两个位置并探活，因此守护进程只需写其中一个。
 //
-// 另外支持用 SSH_TUNNEL_DATA_DIR 显式指定位置（客户端读取同一个变量），
+// 另外支持用 PORTWAY_DATA_DIR 显式指定位置（客户端读取同一个变量），
 // 用于自定义部署，以及在没有管理员权限的机器上验证系统级路径。
 package discovery
 
@@ -23,7 +23,7 @@ import (
 const FileName = "daemon.json"
 
 // EnvDataDir 可显式指定发现文件所在目录，优先级高于按运行方式推断的默认位置。
-const EnvDataDir = "SSH_TUNNEL_DATA_DIR"
+const EnvDataDir = "PORTWAY_DATA_DIR"
 
 // Info 是客户端做本地服务发现时读取的内容。
 type Info struct {
@@ -46,12 +46,12 @@ func UserPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".ssh-tunnel", FileName), nil
+	return filepath.Join(home, ".portway", FileName), nil
 }
 
 // SharedPath 返回系统级发现文件路径。
 //
-// 设置 SSH_TUNNEL_DATA_DIR 时以它为准（此时与「是否服务模式」无关），
+// 设置 PORTWAY_DATA_DIR 时以它为准（此时与「是否服务模式」无关），
 // 便于自定义部署，也便于在普通权限下验证多路径发现。
 func SharedPath() (string, error) {
 	if dir := strings.TrimSpace(os.Getenv(EnvDataDir)); dir != "" {
@@ -63,7 +63,7 @@ func SharedPath() (string, error) {
 // Candidates 返回客户端应当依次尝试的位置，顺序即优先级。
 //
 // 与客户端 daemon_discovery.dart 中的候选顺序保持一致：
-// SSH_TUNNEL_DATA_DIR 覆盖 → 用户目录 → 系统公共目录。
+// PORTWAY_DATA_DIR 覆盖 → 用户目录 → 系统公共目录。
 func Candidates() []string {
 	candidates := make([]string, 0, 3)
 	add := func(path string) {
@@ -97,7 +97,7 @@ func samePath(a, b string) bool {
 
 // Write 写入发现文件，返回实际写入的路径。
 //
-// 优先使用 SSH_TUNNEL_DATA_DIR 指定的位置；否则 serviceMode 为真时写到
+// 优先使用 PORTWAY_DATA_DIR 指定的位置；否则 serviceMode 为真时写到
 // 系统公共目录，为假时写用户目录。
 func Write(info Info, serviceMode bool) (string, error) {
 	path, shared, err := targetPath(serviceMode)

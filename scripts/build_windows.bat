@@ -15,7 +15,7 @@ rem       the separate daemon, which reintroduces the startup handshake.
 rem       Set SKIP_ENGINE=1 to skip it deliberately.
 rem    3. go build daemon and copy into the release dir (fallback engine,
 rem       and still used by "mark-portable" below)
-rem    4. copy ssh-tunnel.example.toml as a sample config
+rem    4. copy portway.example.toml as a sample config
 rem    5. run Inno Setup 6 to produce the setup installer (dist\)
 rem    6. pack the release dir into a portable zip (dist\)
 rem
@@ -58,7 +58,7 @@ go build -trimpath -ldflags "-s -w -X main.version=%APP_VERSION% -X main.release
 popd
 
 echo [4/6] Copying sample config...
-copy /y "daemon\ssh-tunnel.example.toml" "%RELEASE_DIR%\ssh-tunnel.example.toml" >nul || exit /b 1
+copy /y "daemon\portway.example.toml" "%RELEASE_DIR%\portway.example.toml" >nul || exit /b 1
 "%RELEASE_DIR%\portway-daemon.exe" update mark-portable || exit /b 1
 
 echo [5/6] Building installer with Inno Setup 6...

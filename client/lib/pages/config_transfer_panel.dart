@@ -77,7 +77,7 @@ class _ConfigTransferPanelState extends ConsumerState<ConfigTransferPanel> {
     final exported = await client.exportConfig();
     if (!mounted) return;
     final saved = await FilePicker.saveFile(
-      fileName: 'ssh-tunnel.toml',
+      fileName: 'portway.toml',
       bytes: Uint8List.fromList(utf8.encode(exported.content)),
       mimeType: 'application/toml',
       dialogTitle: '导出隧道配置',

@@ -42,7 +42,7 @@ func Run(args []string, version, repository string, input io.Reader, output io.W
 	if err != nil {
 		return err
 	}
-	cache := filepath.Join(cacheBase, "ssh-tunnel", "updates")
+	cache := filepath.Join(cacheBase, "portway", "updates")
 	executable, err := os.Executable()
 	if err != nil {
 		return err

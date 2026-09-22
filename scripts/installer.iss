@@ -39,7 +39,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\{#MyAppExe}
 ; 安装程序自身图标与快捷方式图标复用客户端的应用图标。
 SetupIconFile=..\client\windows\runner\resources\app_icon.ico
-; 程序在安装后可写入的只有用户目录（配置 / 发现文件都落在 ~/.ssh-tunnel），
+; 程序在安装后可写入的只有用户目录（配置 / 发现文件都落在 ~/.portway），
 ; 因此按用户级安装，无需管理员权限。
 
 [Languages]

@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 
 $resolver = Join-Path $PSScriptRoot 'resolve_release_version.ps1'
-$testDirectory = Join-Path ([IO.Path]::GetTempPath()) ('ssh-tunnel-version-tests-' + [guid]::NewGuid().ToString('N'))
+$testDirectory = Join-Path ([IO.Path]::GetTempPath()) ('portway-version-tests-' + [guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($testDirectory) | Out-Null
 $utf8 = [Text.UTF8Encoding]::new($false)
 $pubspecPath = Join-Path $testDirectory 'pubspec.yaml'

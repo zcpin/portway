@@ -13,7 +13,7 @@ import (
 //
 // 放在配置文件旁边（<配置目录>/frp/clients），而不是固定的用户目录：
 // 每个工作区因此自带一套 FRP 配置，切换工作区不会串台，
-// 自定义数据目录（SSH_TUNNEL_DATA_DIR）之类也不需要额外适配。
+// 自定义数据目录（PORTWAY_DATA_DIR）之类也不需要额外适配。
 func frpConfigDir(configPath string) string {
 	return filepath.Join(filepath.Dir(configPath), "frp", "clients")
 }

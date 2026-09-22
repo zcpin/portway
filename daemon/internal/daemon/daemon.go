@@ -217,9 +217,9 @@ func ResolveConfigPath(input string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		fallback := filepath.Join(home, ".ssh-tunnel", "config.toml")
+		fallback := filepath.Join(home, ".portway", "config.toml")
 
-		for _, candidate := range []string{"ssh-tunnel.toml", "config.toml", fallback} {
+		for _, candidate := range []string{"portway.toml", "config.toml", fallback} {
 			if _, err := os.Stat(candidate); err == nil {
 				path = candidate
 				break

@@ -60,7 +60,7 @@ void main() {
   });
 
   setUp(() async {
-    tempDir = await Directory.systemTemp.createTemp('ssh-tunnel-ffi');
+    tempDir = await Directory.systemTemp.createTemp('portway-ffi');
   });
 
   tearDown(() async {
