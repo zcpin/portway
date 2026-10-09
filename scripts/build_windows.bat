@@ -39,6 +39,7 @@ if "%RELEASE_REPOSITORY%"=="" set "RELEASE_REPOSITORY=zcpin/portway"
 set "RELEASE_DIR=client\build\windows\x64\runner\Release"
 
 echo [1/6] Building Flutter client...
+powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\prepare_windows_build.ps1" || exit /b 1
 pushd client
 call flutter build windows --release --build-name "%BUILD_NAME%" --build-number "%BUILD_NUMBER%" || exit /b 1
 popd

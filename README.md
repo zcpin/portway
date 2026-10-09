@@ -513,6 +513,21 @@ dart analyze
 flutter test
 ```
 
+### 应用图标
+
+图标资源（Windows 多尺寸 ICO、托盘图标、macOS 图标集）统一由 `scripts/generate_app_icon.py`
+从原始设计稿 `client/assets/icon_source.png` 生成。换设计只需替换这张源图再重跑脚本
+（需要 Pillow；仅本机生成时需要，不参与构建）：
+
+```bash
+python scripts/generate_app_icon.py            # 覆盖全部图标资源
+python scripts/generate_app_icon.py --preview  # 只出 docs/icon-preview-*.png 对照图
+```
+
+轮廓在 ≤32px 的档位改用参数化矢量模型渲染（原稿缩这么小会糊成一团），配色从源图采样
+二维颜色场；>32px 直接重采样源图，与设计稿逐像素一致。Windows 的 .ico 中 ≤64px 存
+32bpp DIB、128/256 存 PNG，桌面快捷方式与安装程序取到的都是对应尺寸的原生位图。
+
 `client/test/embedded_engine_ffi_test.dart` 会真的加载 `daemon/bin/` 里的动态库，
 验证 Dart 声明与 Go 导出符号、句柄宽度、字符串释放方式和 `{"ok":..}` 信封格式对得上；
 动态库不存在时该文件整体跳过，因此只跑 Dart 逻辑的 CI 不会因此变红。
