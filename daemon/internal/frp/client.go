@@ -179,7 +179,7 @@ func (i *Instance) Start() error {
 
 	go func() {
 		defer close(done)
-		// Run 会一直阻塞到 Close，返回值只在出错时才有意义。
+		// Run 监听 ctx 取消并自行关闭连接，返回值只在出错时才有意义。
 		if err := service.Run(ctx); err != nil && ctx.Err() == nil {
 			i.setError(err)
 		}
@@ -196,13 +196,11 @@ func (i *Instance) Stop() {
 		i.mu.Unlock()
 		return
 	}
-	cancel, done, svc := i.cancel, i.done, i.svc
+	cancel, done := i.cancel, i.done
 	i.mu.Unlock()
 
-	// 先让 frp 关掉连接，再取消 ctx；反过来会让 Run 里的清理逻辑看到已取消的上下文。
-	if svc != nil {
-		svc.GracefulClose(500 * time.Millisecond)
-	}
+	// Stop 可能先于后台 Run 执行。GracefulClose 依赖 Run 初始化的取消函数，
+	// 此时调用会发生竞态甚至 panic；取消实例上下文，由 Run 统一清理资源。
 	cancel()
 
 	if done != nil {

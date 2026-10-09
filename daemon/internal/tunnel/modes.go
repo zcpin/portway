@@ -10,15 +10,35 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/crypto/ssh"
 )
 
 func (f *Forwarder) dialSSH(ctx context.Context, target string) (net.Conn, error) {
+	var conn net.Conn
+	var err error
 	if client, ok := f.sshClient.(interface {
 		DialContext(context.Context, string, string) (net.Conn, error)
 	}); ok {
-		return client.DialContext(ctx, "tcp", target)
+		conn, err = client.DialContext(ctx, "tcp", target)
+	} else {
+		conn, err = f.sshClient.Dial("tcp", target)
 	}
-	return f.sshClient.Dial("tcp", target)
+	var rejected *ssh.OpenChannelError
+	if err == nil || errors.As(err, &rejected) || errors.Is(err, context.Canceled) {
+		// 服务端明确拒绝目标连接不代表 SSH 会话失效。
+		return conn, err
+	}
+	if f.ctx != nil && f.ctx.Err() != nil {
+		return conn, err
+	}
+	// DialContext 超时只结束当前等待，不会关闭失效的 SSH 会话。
+	// 通知主循环重连；缓冲和 default 避免并发失败或诊断调用阻塞。
+	select {
+	case f.failure <- fmt.Errorf("SSH forwarding channel to %s failed: %w", target, err):
+	default:
+	}
+	return conn, err
 }
 
 func (f *Forwarder) connectTarget(incoming net.Conn) (net.Conn, error) {

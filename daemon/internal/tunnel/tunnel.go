@@ -258,18 +258,25 @@ func (t *Tunnel) connectAndForward(ctx context.Context) (bool, error) {
 	go t.keepAlive(keepAliveCtx, client)
 
 	// SSH 连接断开（对端关闭、网络中断等）时 client.Wait 返回
-	clientDone := make(chan struct{}, 1)
+	clientDone := make(chan error, 1)
 	go func() {
-		_ = client.Wait()
-		clientDone <- struct{}{}
+		clientDone <- client.Wait()
 	}()
 
 	select {
 	case <-ctx.Done():
 		// 手动停止或重连被取消
-	case <-clientDone:
+	case err := <-clientDone:
 		if ctx.Err() == nil {
-			runErr = errors.New("SSH connection closed unexpectedly")
+			if err == nil {
+				runErr = errors.New("SSH connection closed unexpectedly")
+			} else {
+				runErr = fmt.Errorf("SSH connection closed: %w", err)
+			}
+		}
+	case err := <-forwarder.Failure():
+		if ctx.Err() == nil {
+			runErr = err
 		}
 	case <-forwarder.Done():
 		if ctx.Err() == nil {
@@ -317,7 +324,7 @@ func (t *Tunnel) keepAlive(ctx context.Context, client sshConn) {
 				timer.Stop()
 			}
 			if err != nil {
-				logger.Debug("[%s] SSH keepalive failed, closing connection: %v", t.config.Name, err)
+				logger.Warn("[%s] SSH keepalive failed, closing connection: %v", t.config.Name, err)
 				client.Close()
 				return
 			}

@@ -22,6 +22,7 @@ type Forwarder struct {
 	// done 在 accept 循环退出时关闭，供调用方感知 listener 意外终止
 	done     chan struct{}
 	doneOnce sync.Once
+	failure  chan error
 	wg       sync.WaitGroup
 	stopOnce sync.Once
 
@@ -44,12 +45,18 @@ func NewForwarder(tunnelName, localHost, localPort, remoteHost, remotePort strin
 		sshClient:  sshClient,
 		stopChan:   make(chan struct{}),
 		done:       make(chan struct{}),
+		failure:    make(chan error, 1),
 	}
 }
 
 // Done 返回的 channel 在 accept 循环退出（停止或出错）时关闭。
 func (f *Forwarder) Done() <-chan struct{} {
 	return f.done
+}
+
+// Failure 通知需要重建 SSH 会话的转发故障。
+func (f *Forwarder) Failure() <-chan error {
+	return f.failure
 }
 
 func (f *Forwarder) Start() error {
@@ -180,13 +187,27 @@ func (f *Forwarder) handleConnection(localConn net.Conn) {
 func (f *Forwarder) copyData(src, dst net.Conn, direction string) error {
 	// io.Copy 先转发 n > 0 的数据，再处理同次 Read 返回的 EOF/错误。
 	// Stop 通过关闭已登记的连接解除阻塞，无需轮询读超时。
-	if _, err := io.Copy(dst, src); err != nil {
+	n, err := io.Copy(dst, src)
+	if err == nil {
+		if conn, ok := dst.(interface{ CloseWrite() error }); ok {
+			err = conn.CloseWrite()
+		}
+	}
+	select {
+	case <-f.stopChan:
 		return err
+	default:
 	}
-	if conn, ok := dst.(interface{ CloseWrite() error }); ok {
-		return conn.CloseWrite()
+	// 两个方向分别记录结果：一个方向正常 EOF 后，另一个方向仍可能失败。
+	// 目标结束发送在默认级别可见；客户端主动结束发送保留为调试日志。
+	if err != nil {
+		logger.Warn("[%s] %s forwarding %s failed after %d bytes: %v", f.tunnelName, f.mode, direction, n, err)
+	} else if direction == "remote->local" {
+		logger.Info("[%s] %s forwarding %s ended (EOF, %d bytes)", f.tunnelName, f.mode, direction, n)
+	} else {
+		logger.Debug("[%s] %s forwarding %s ended (EOF, %d bytes)", f.tunnelName, f.mode, direction, n)
 	}
-	return nil
+	return err
 }
 
 func (f *Forwarder) Stop() {
