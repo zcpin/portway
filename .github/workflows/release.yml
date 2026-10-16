@@ -84,6 +84,10 @@ jobs:
         shell: pwsh
         run: ./scripts/test_autostart_cleanup.ps1
 
+      - name: Test legacy install detection
+        shell: pwsh
+        run: ./scripts/test_legacy_install.ps1
+
       # 复用本地一键脚本：flutter build + go build + 拷入 daemon + Inno 打包 + 便携 zip。
       - name: Build daemon + client + installer + portable zip
         shell: cmd

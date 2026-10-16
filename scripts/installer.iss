@@ -1,4 +1,4 @@
-﻿; 端口通（Portway）—— Windows 安装程序（Inno Setup 6）
+; 端口通（Portway）—— Windows 安装程序（Inno Setup 6）
 ; 用法：ISCC /DAppVersion=1.0.0 scripts\installer.iss
 ; 由 scripts\build_windows.bat 调用，也可单独运行。
 
@@ -29,6 +29,11 @@ AppPublisher=byteporter
 DefaultDirName={localappdata}\Programs\Portway
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
+; 显式保留安装路径选择页。
+;
+; Inno Setup 在「已安装同一 AppId」时默认跳过该页（沿用注册表记录的旧路径），
+; 用户因此没有机会改目录。这里显式开启，配合 legacy_install.iss 的旧版本卸载。
+DisableDirPage=no
 PrivilegesRequired=lowest
 OutputDir=..\dist
 OutputBaseFilename=portway-setup-{#AppVersion}
@@ -61,6 +66,13 @@ Filename: "{app}\{#MyAppExe}"; Description: "启动 {#MyAppName}"; Flags: nowait
 
 [Code]
 #include "autostart_cleanup.iss"
+#include "legacy_install.iss"
+
+// 安装开始前先卸载已安装的旧版本。返回 False 会中止安装。
+function InitializeSetup(): Boolean;
+begin
+  Result := CheckLegacyInstall();
+end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
