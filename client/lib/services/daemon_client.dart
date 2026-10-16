@@ -5,6 +5,7 @@ import 'package:dio/dio.dart';
 
 import '../models.dart';
 import '../models/frp.dart';
+import '../models/port.dart';
 import '../models/tunnel_diagnostic.dart';
 import 'tunnel_engine.dart';
 
@@ -100,6 +101,35 @@ class DaemonClient implements TunnelEngine {
   Future<List<LogEntry>> getLogs() async {
     final resp = await _dio.get('/api/logs');
     return (resp.data as List).map((e) => LogEntry.fromJson(e)).toList();
+  }
+
+  // ---------- 端口占用 ----------
+
+  @override
+  Future<PortSnapshot> getPorts([PortFilter filter = const PortFilter()]) async {
+    final resp = await _dio.get('/api/ports', queryParameters: filter.toQuery());
+    return PortSnapshot.fromJson(Map<String, dynamic>.from(resp.data));
+  }
+
+  @override
+  Future<PortCheck> checkPort(int port, {String protocol = ''}) async {
+    final resp = await _dio.get('/api/ports/check', queryParameters: {
+      'port': port,
+      if (protocol.isNotEmpty) 'protocol': protocol,
+    });
+    return PortCheck.fromJson(Map<String, dynamic>.from(resp.data));
+  }
+
+  @override
+  Future<KillResult> killProcess(int pid, {bool force = false}) async {
+    final resp = await _dio.post('/api/ports/kill', data: {'pid': pid, 'force': force});
+    return KillResult.fromJson(Map<String, dynamic>.from(resp.data));
+  }
+
+  @override
+  Future<String> resolveProcessPath(int pid) async {
+    final resp = await _dio.post('/api/ports/reveal', data: {'pid': pid});
+    return (resp.data as Map)['path'].toString();
   }
 
   @override

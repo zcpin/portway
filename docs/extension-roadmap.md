@@ -165,3 +165,17 @@ daemon 在隧道生命周期中记录结构化运行状态，保留 `is_running`
 - 收藏、顺序和打开方式采用独立 JSON 文件、串行写入、文件锁与原子替换；损坏或超大的文件会报错并保留原内容。新增 `url_launcher` 提供平台默认浏览器打开能力。
 - 验证通过：Dart analyze、Flutter 78 项测试、Windows release 构建。覆盖并发持久化、工作区隔离、排序与改名迁移、偏好损坏保护、快捷键与配置界面、网址校验、原样参数传递、连接就绪等待、重复打开合并及迟到结果隔离。
 - 验证边界：外部打开使用临时程序夹具与注入的启动器验证，未启动真实数据库客户端；未替换当前安装或修改 SDK 目录。Go 代码沿用上一项已通过的全量测试与 vet 结果。
+
+### 第 8 项：端口占用查询与检测（2026-09-14）
+
+设计文档见 `docs/port-inspector-design.md`。
+
+- 新增 `daemon/internal/portscan` 包：公共类型、scope 推导、系统进程判定、排序与筛选为平台无关纯逻辑；平台实现分 `ports_windows.go`（iphlpapi）、`ports_linux.go`（`/proc/net/*`）、`ports_darwin.go`（`lsof`）三份。平台逻辑放 Go 侧而不是 Dart 侧，因为两种引擎形态要共用一份实现，且 daemon 可能以系统服务身份运行、能看到普通用户看不到的端口归属。
+- Windows 走 `GetExtendedTcpTable`/`GetExtendedUdpTable` 而非解析 `netstat -ano`：后者的列名随系统语言变化（中文 Windows 输出「本地地址」），解析会碎。进程名与路径走 `QueryFullProcessImageName`（微秒级），命令行走 WMI（200–500ms）因此默认不查、按需补全。macOS 不引入 CGO（`sysctl` pcblist 需要 C 工具链，而 daemon 本身不依赖 CGO），改用 `lsof`。
+- 明确区分「没有」和「读不到」：`Partial` 标记 + `Warnings`，读不到进程信息时**不隐藏条目**而是如实显示归属未知并提示可能需要管理员权限——隐藏会让用户误判端口空闲。`PID = 0` 是合法状态（Linux 非 root 读不到别人的 `/proc/<pid>/fd`），不是错误。
+- 结束进程的保护规则放 Go 侧（拒绝 PID 0/4、Portway 自身进程、系统关键进程白名单），安全边界不能依赖界面自觉。Windows 上没有优雅终止，`force` 参数不产生行为差异，界面文案如实说明「等同强制终止，进程没有机会保存数据」。`/api/ports/reveal` 只返回路径，实际打开文件管理器由客户端执行——daemon 可能是 LocalSystem 身份，以该身份 `explorer.exe /select,` 打开的窗口不属于用户桌面会话。
+- 客户端新增「端口」页（导航位于「密钥」与「日志」之间），支持按端口号/PID/进程名/路径/地址搜索，按协议、监听范围、是否仅非系统进程筛选，结束进程与定位到进程目录。筛选放服务端（避免全量传输，且 `with_command_line` 必须服务端控制），界面即时输入过滤在客户端做，两者共用同一套匹配规则。隧道编辑器的本地端口旁新增「检测占用」按钮，固定查 TCP（隧道不涉及 UDP），三态结果且检测失败不阻断保存。
+- UDP 纳入本期并明确标注为「UDP 绑定」：UDP 没有连接状态机，所有绑定都列出，其 `0.0.0.0` 表示接受任意来源的数据报而非监听连接。TCP 只取 LISTEN 态。
+- 验证通过：Windows Go 全量测试与 vet、`GOOS=linux/darwin go vet`、五个目标平台（windows/amd64、linux/amd64、linux/arm64、darwin/amd64、darwin/arm64）交叉编译；Dart analyze、Flutter 117 项测试。真机端到端验证：起独立 daemon，用真实进程占端口 → 列表命中该进程 → `check` 报占用 → `kill` 成功并返回进程名 → 端口释放、进程退出。
+- 验证边界：Linux/macOS 平台代码在本机无法执行，通过「把纯解析函数复制到 Windows 可运行程序里喂真实格式固定输入」+ 交叉编译 vet 验证；未在真实 Linux/macOS 上跑过端到端。Windows 上非管理员身份验证，管理员权限下的行为差异未覆盖。
+- 实现中修掉的缺陷（均有回归测试）：`TCP_TABLE_CLASS` 常量误写成 2（正确是 3）导致全表 PID 错位且 API 不报错；`size` 参数是 in/out 导致行宽算错把正确数据全丢；`System` 判定位置错误使内核占用出现在「仅非系统进程」结果里；`partial` 误报；`User` 字段静默为空；结束进程响应里进程名为空（改为 kill 前先取名字）；「检测占用」的转圈动画让 widget 测试 `pumpAndSettle` 永不静止。

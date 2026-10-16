@@ -143,6 +143,11 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("POST /api/reload", s.auth(http.HandlerFunc(s.handleReload)))
 	mux.Handle("GET /api/status", s.auth(http.HandlerFunc(s.handleStatus)))
 	mux.Handle("POST /api/update/shutdown", s.auth(http.HandlerFunc(s.handleUpdateShutdown)))
+
+	mux.Handle("GET /api/ports", s.auth(http.HandlerFunc(s.handleListPorts)))
+	mux.Handle("GET /api/ports/check", s.auth(http.HandlerFunc(s.handleCheckPort)))
+	mux.Handle("POST /api/ports/kill", s.auth(http.HandlerFunc(s.handleKillProcess)))
+	mux.Handle("POST /api/ports/reveal", s.auth(http.HandlerFunc(s.handleRevealProcess)))
 	mux.Handle("GET /api/config", s.auth(http.HandlerFunc(s.handleGetConfig)))
 	mux.Handle("GET /api/config/export", s.auth(http.HandlerFunc(s.handleExportConfig)))
 	mux.Handle("POST /api/config/preview", s.auth(http.HandlerFunc(s.handlePreviewImport)))

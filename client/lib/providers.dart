@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'models.dart';
 import 'models/frp.dart';
+import 'models/port.dart';
 import 'services/daemon_client.dart';
 import 'services/daemon_discovery.dart';
 import 'services/daemon_launcher.dart';
@@ -606,6 +607,79 @@ class FrpClientsNotifier extends AsyncNotifier<List<FrpClient>> {
 
 final frpClientsProvider =
     AsyncNotifierProvider<FrpClientsNotifier, List<FrpClient>>(FrpClientsNotifier.new);
+
+// ---------- 端口占用 ----------
+
+/// 端口占用列表。
+///
+/// 与其它列表不同，这个 notifier 的筛选条件是**用户可控状态**而不是
+/// 构建期参数：筛选变化时不能重建 provider（会丢失滚动位置与展开行），
+/// 而是就地重新扫描。
+///
+/// 注意 [build] 刻意不自动扫描：端口扫描要枚举系统表并补全进程信息，
+/// 打开页面就扫会让「只是想看看隧道」的用户白等一次采集。页面在
+/// 首次可见时主动调 [refresh]。
+class PortsNotifier extends AsyncNotifier<PortSnapshot> {
+  PortFilter _filter = const PortFilter();
+
+  PortFilter get filter => _filter;
+
+  @override
+  Future<PortSnapshot> build() async {
+    final client = await ref.watch(clientProvider.future);
+    if (client == null) return const PortSnapshot();
+    return client.getPorts(_filter);
+  }
+
+  /// 更新筛选条件并重新扫描。
+  Future<void> applyFilter(PortFilter filter) async {
+    _filter = filter;
+    await refresh();
+  }
+
+  Future<void> refresh() async {
+    final client = await ref.read(clientProvider.future);
+    if (client == null) {
+      state = const AsyncData(PortSnapshot());
+      return;
+    }
+    if (!_clientIsCurrent(ref, client)) return;
+    state = const AsyncLoading();
+    final next = await AsyncValue.guard(() => client.getPorts(_filter));
+    if (_clientIsCurrent(ref, client)) state = next;
+  }
+
+  /// 结束进程，返回结果供界面决定文案。
+  ///
+  /// 结束后重新扫描而不是只信返回值：进程退出需要时间，
+  /// 而且同一个进程可能还占着别的端口。
+  Future<KillResult> kill(int pid, {bool force = false}) async {
+    final client = await ref.read(clientProvider.future);
+    if (client == null) throw StateError('未连接到引擎');
+    if (!_clientIsCurrent(ref, client)) throw StateError('实例已切换，请重试');
+    final result = await client.killProcess(pid, force: force);
+    if (!_clientIsCurrent(ref, client)) return result;
+    await refresh();
+    return result;
+  }
+
+  /// 解析进程可执行文件路径，由界面负责打开文件管理器。
+  Future<String> resolvePath(int pid) async {
+    final client = await ref.read(clientProvider.future);
+    if (client == null) throw StateError('未连接到引擎');
+    return client.resolveProcessPath(pid);
+  }
+
+  /// 补全命令行后重新扫描（用户展开行或搜索命令行时触发）。
+  Future<void> loadCommandLines() async {
+    if (_filter.withCommandLine) return;
+    _filter = _filter.copyWith(withCommandLine: true);
+    await refresh();
+  }
+}
+
+final portsProvider =
+    AsyncNotifierProvider<PortsNotifier, PortSnapshot>(PortsNotifier.new);
 
 // ---------- 日志 ----------
 

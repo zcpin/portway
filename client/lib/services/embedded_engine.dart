@@ -10,6 +10,7 @@ import 'package:flutter/foundation.dart' show visibleForTesting;
 
 import '../models.dart';
 import '../models/frp.dart';
+import '../models/port.dart';
 import '../models/tunnel_diagnostic.dart';
 import 'tunnel_engine.dart';
 
@@ -613,6 +614,45 @@ class EmbeddedEngine implements TunnelEngine {
   Future<void> toggleFrpProxy(String client, String proxy, bool enabled) async {
     _check(await _invokeInBackground(_EngineCall(
         _libraryPath, _handle, 'sshtunnel_frp_toggle_proxy', client, proxy, jsonEncode({'enabled': enabled}))));
+  }
+
+  // ---------- 端口占用 ----------
+
+  @override
+  Future<PortSnapshot> getPorts([PortFilter filter = const PortFilter()]) async {
+    final payload = jsonEncode({
+      if (filter.text.trim().isNotEmpty) 'q': filter.text.trim(),
+      if (filter.protocol.isNotEmpty) 'protocol': filter.protocol,
+      if (filter.scope.isNotEmpty) 'scope': filter.scope,
+      if (filter.nonSystemOnly) 'system': false,
+      'with_command_line': filter.withCommandLine,
+    });
+    // 端口扫描要枚举系统表并补全进程信息，放到后台 isolate，
+    // 避免几百毫秒的采集卡住界面。
+    final raw = await _invokeInBackground(_EngineCall(_libraryPath, _handle, 'sshtunnel_ports', payload));
+    return PortSnapshot.fromJson((_check(raw) as Map).cast<String, dynamic>());
+  }
+
+  @override
+  Future<PortCheck> checkPort(int port, {String protocol = ''}) async {
+    final payload = jsonEncode({'port': port, 'protocol': protocol});
+    final raw = await _invokeInBackground(_EngineCall(_libraryPath, _handle, 'sshtunnel_check_port', payload));
+    return PortCheck.fromJson((_check(raw) as Map).cast<String, dynamic>());
+  }
+
+  @override
+  Future<KillResult> killProcess(int pid, {bool force = false}) async {
+    final payload = jsonEncode({'pid': pid, 'force': force});
+    final raw = await _invokeInBackground(_EngineCall(_libraryPath, _handle, 'sshtunnel_kill_process', payload));
+    return KillResult.fromJson((_check(raw) as Map).cast<String, dynamic>());
+  }
+
+  @override
+  Future<String> resolveProcessPath(int pid) async {
+    final payload = jsonEncode({'pid': pid});
+    final raw = await _invokeInBackground(_EngineCall(_libraryPath, _handle, 'sshtunnel_resolve_process_path', payload));
+    // 引擎的 data 直接就是路径字符串（不同于 HTTP 侧的 {"path": ...}）。
+    return _check(raw).toString();
   }
 
   // ---------- 日志与配置 ----------

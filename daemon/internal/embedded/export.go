@@ -291,6 +291,28 @@ func sshtunnel_diagnose_tunnel(handle C.longlong, name *C.char) *C.char {
 	return with(handle, func(engine *Engine) string { return engine.DiagnoseTunnel(C.GoString(name)) })
 }
 
+// ---------- 端口占用 ----------
+
+//export sshtunnel_ports
+func sshtunnel_ports(handle C.longlong, payload *C.char) *C.char {
+	return with(handle, func(engine *Engine) string { return engine.ScanPorts(C.GoString(payload)) })
+}
+
+//export sshtunnel_check_port
+func sshtunnel_check_port(handle C.longlong, payload *C.char) *C.char {
+	return with(handle, func(engine *Engine) string { return engine.CheckPort(C.GoString(payload)) })
+}
+
+//export sshtunnel_kill_process
+func sshtunnel_kill_process(handle C.longlong, payload *C.char) *C.char {
+	return with(handle, func(engine *Engine) string { return engine.KillProcess(C.GoString(payload)) })
+}
+
+//export sshtunnel_resolve_process_path
+func sshtunnel_resolve_process_path(handle C.longlong, payload *C.char) *C.char {
+	return with(handle, func(engine *Engine) string { return engine.ResolveProcessPath(C.GoString(payload)) })
+}
+
 // ---------- SSH 连接 ----------
 
 //export sshtunnel_add_ssh_connection

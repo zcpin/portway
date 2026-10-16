@@ -1,8 +1,10 @@
 import 'dart:io';
+import 'dart:io' as io;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:portway/models.dart';
 import 'package:portway/models/frp.dart';
+import 'package:portway/models/port.dart';
 import 'package:portway/services/embedded_engine.dart';
 
 /// 进程内引擎的端到端验证：真的把 Go 编译出的动态库加载进来，走一遍 FFI。
@@ -312,5 +314,24 @@ void main() {
     await engine.stopFrpClient('offline');
     client = (await engine.getFrpClients()).single;
     expect(client.isRunning, isFalse);
+  });
+
+  test('端口扫描可读，且路径解析返回裸字符串', () async {
+    final engine = await EmbeddedEngine.launch(configPath: configPath());
+    addTearDown(engine.close);
+
+    final snapshot = await engine.getPorts(const PortFilter());
+    expect(snapshot.scannedAt, isNotEmpty);
+    // 不断言扫到哪些端口：那取决于跑测试的机器上恰好开着什么。
+
+    final selfPid = io.pid;
+    // 当前进程自己一定可被解析出路径，用它验证返回形状。
+    //
+    // 回归防护：引擎的 data 直接是路径字符串，不是 HTTP 侧的 {"path": ...}。
+    // 曾把这里写成 `as Map`，导致「定位到进程目录」抛
+    // type 'String' is not a subtype of type 'Map<dynamic, dynamic>' in type cast。
+    final path = await engine.resolveProcessPath(selfPid);
+    expect(path, isNotEmpty);
+    expect(path, isNot(startsWith('{')));
   });
 }

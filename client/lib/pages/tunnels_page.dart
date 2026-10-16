@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../connection_preferences_provider.dart';
 import '../models.dart';
 import '../models/connection_preferences.dart';
+import '../models/port.dart';
 import '../providers.dart';
 import '../services/connection_preferences.dart';
 import '../services/daemon_client.dart';
@@ -589,6 +590,13 @@ class _TunnelEditorState extends ConsumerState<TunnelEditorDialog> {
                             int.tryParse(v ?? '') == null ? '请填写有效端口' : null,
                       ),
                     ),
+                    // remote 模式下本机不监听，端口占用与隧道无关，不提供检测。
+                    if (_mode != 'remote') ...[
+                      const SizedBox(width: 8),
+                      _PortCheckButton(
+                        port: () => int.tryParse(_localPort.text.trim()),
+                      ),
+                    ],
                     if (_mode != 'dynamic') ...[
                     const SizedBox(width: 12),
                     Expanded(
@@ -779,5 +787,114 @@ class _TunnelEditorState extends ConsumerState<TunnelEditorDialog> {
       agentSocket: _agentSocket.text.trim(), proxyJump: parseJumpNames(_proxyJump.text),
       hostKeyCheck: _hostKeyCheck, knownHostsFile: _knownHosts.text.trim()));
     if (mounted) setState(() { _securityBusy = false; if (trusted) _hostKeyCheck = 'known_hosts'; });
+  }
+}
+
+/// 隧道编辑器里的「检测占用」按钮。
+///
+/// 三态结果：空闲 / 被占用 / 检测失败。检测失败**不阻断保存**——端口检测是
+/// 辅助信息而不是校验规则，做成硬校验会让离线编辑配置变得不可能。
+///
+/// 固定传 protocol=tcp：隧道不涉及 UDP，把 UDP 冲突报成「端口不可用」
+/// 会误导用户。
+class _PortCheckButton extends ConsumerStatefulWidget {
+  const _PortCheckButton({required this.port});
+
+  /// 延迟取值：端口号来自同表单的输入框，点按钮时才读当前内容。
+  final int? Function() port;
+
+  @override
+  ConsumerState<_PortCheckButton> createState() => _PortCheckButtonState();
+}
+
+class _PortCheckButtonState extends ConsumerState<_PortCheckButton> {
+  bool _busy = false;
+
+  Future<void> _check() async {
+    final port = widget.port();
+    if (port == null || port < 1 || port > 65535) {
+      showErrorSnack(context, '请先填写有效的端口号');
+      return;
+    }
+    setState(() => _busy = true);
+    PortCheck? result;
+    Object? failure;
+    try {
+      final client = await ref.read(clientProvider.future);
+      if (client == null) throw StateError('未连接到引擎');
+      result = await client.checkPort(port, protocol: 'tcp');
+    } catch (e) {
+      failure = e;
+    }
+    if (!mounted) return;
+    // 先收起转圈再弹窗：转圈是无限动画，留着会让 pumpAndSettle 永远等不到
+    // 静止，界面本身也会一直闪。
+    setState(() => _busy = false);
+
+    if (failure != null) {
+      showErrorSnack(context, failure);
+      return;
+    }
+    final checked = result!;
+    if (!checked.inUse) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('端口 $port 空闲，可以使用')));
+      return;
+    }
+    await _showOccupied(port, checked);
+  }
+
+  /// 展示占用详情。
+  ///
+  /// 这里只提示、不提供「结束进程」：用户正在编辑配置，弹一个能杀进程的
+  /// 对话框风险太大。要结束进程请到「端口」页，那里有完整的上下文。
+  Future<void> _showOccupied(int port, PortCheck result) async {
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('端口 $port 已被占用'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('启动隧道时可能失败。占用情况：'),
+            const SizedBox(height: 12),
+            ...result.entries.map((e) => Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Text(
+                    '${e.protocol.toUpperCase()} ${e.localAddr}:${e.localPort}'
+                    '${e.hasProcess ? ' — ${e.processName} (PID ${e.pid})' : ' — 无法确定占用进程'}',
+                    style: Theme.of(dialogContext).textTheme.bodySmall,
+                  ),
+                )),
+            const SizedBox(height: 12),
+            Text(
+              '可以在「端口」页结束占用进程。',
+              style: Theme.of(dialogContext).textTheme.bodySmall,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('知道了'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: '检测该端口是否已被占用',
+      child: OutlinedButton.icon(
+        onPressed: _busy ? null : _check,
+        icon: _busy
+            ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+            : const Icon(Icons.search, size: 16),
+        label: const Text('检测占用'),
+      ),
+    );
   }
 }

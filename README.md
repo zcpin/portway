@@ -383,6 +383,39 @@ daemon 在 Windows 上监听系统唤醒、地址和路由变化，并在各平�
 
 配置后，卡片和托盘可以「打开服务」或「启动并打开服务」。未连接时先启动并等待 SSH 与本地监听就绪，重复点击会合并；切换实例、手动停止或等待超时会取消打开，超时本身不会停止隧道。目标服务的 TCP 可达性仍可通过「诊断连接」检查。反向转发与 SOCKS5 支持收藏和快捷启停，外部打开仅用于本地端口转发。
 
+## 端口占用查询
+
+「端口」页列出本机所有被占用的端口及其占用进程，用于排查「端口已被占用」这类启动失败。
+
+列表每行显示协议、监听地址与端口、进程名、PID、用户和启动时间，并支持：
+
+- **搜索** —— 端口号、PID、进程名、可执行文件路径、地址都能匹配；精确匹配优先，其次是前缀和子串
+- **筛选** —— 按协议（TCP / UDP）、监听范围（全部 / 仅回环 / 指定地址）、是否仅显示非系统进程
+- **结束进程** —— 确认后终止占用进程，并重新扫描列表
+- **定位到进程目录** —— 在文件管理器中打开可执行文件所在目录并选中它
+
+隧道占用的本地端口会标出对应的隧道名。隧道编辑器的本地端口旁有「检测占用」按钮，可在保存前确认端口是否空闲；**检测失败不会阻断保存**，因为端口检测是辅助信息而不是校验规则。
+
+### 协议与状态
+
+TCP 只列出处于监听（LISTEN）状态的端口。UDP 没有连接状态机，所有绑定都列出并标注为「UDP 绑定」——UDP 的 `0.0.0.0` 表示接受任意来源的数据报，**不等于在监听连接**，不要按 TCP 的直觉理解。
+
+### 权限
+
+进程名、路径、用户等信息受操作系统权限限制：
+
+- Windows 上非管理员可以看到大部分进程名和路径，个别受保护进程除外
+- Linux 上非 root 只能读到**自己启动的**进程占用的端口，其他端口会显示「无法确定占用进程」
+- macOS 依赖 `lsof`，系统自带；若缺失需通过 Homebrew 安装
+
+读不到信息时列表**不会隐藏条目**，而是如实显示端口被占用但归属未知，并在顶部提示可能需要管理员权限。读不到和「没有」是两回事，隐藏会让用户误判端口空闲。
+
+结束进程会拒绝 PID 0/4、Portway 自身进程和系统关键进程。**Windows 上没有优雅终止**：一律等价于强制终止，进程没有机会保存数据，界面对此有明确提示。保护规则是尽力而为的，真正的边界由操作系统决定。
+
+### 性能
+
+扫描本身很快（Windows 上约 10ms）。进程命令行需要额外查询，开销较大，因此**默认不查**，只在展开行或搜索时按需补全。自动刷新**默认关闭**，开启后每 5 秒一次，并在你操作菜单或确认框时暂停。
+
 ## 客户端设置与关于
 
 左侧导航除隧道管理外，还有「设置」与「关于」两个页面：
@@ -448,6 +481,10 @@ portway-daemon service <动作>       系统服务托管
 | PUT/DELETE | `/api/frp/clients/{name}/proxies/{proxy}` | 更新 / 删除代理（改名也走 PUT） |
 | POST | `/api/frp/clients/{name}/proxies/{proxy}/toggle` | `enabled` 为真/假；走热更新，不重连 |
 | GET | `/api/logs` | 日志缓冲 |
+| GET | `/api/ports` | 本机端口占用列表，支持 `q`/`protocol`/`scope`/`system`/`with_command_line` 筛选 |
+| GET | `/api/ports/check?port=<端口>` | 检测单个端口是否被占用，可选 `protocol` |
+| POST | `/api/ports/kill` | 结束占用端口的进程，`pid` 必填、`force` 可选 |
+| POST | `/api/ports/reveal` | 返回进程可执行文件路径（`pid` 必填）；实际打开由客户端执行 |
 | GET | `/api/status` | 所有隧道的运行状态（`{名称: 是否运行}`） |
 | POST | `/api/update/shutdown` | 升级助手携带当前 `pid` 请求退出；仅允许有 token 的用户进程，系统服务拒绝此操作 |
 | POST | `/api/reload` | 重新加载配置 |
@@ -542,7 +579,14 @@ pwsh -NoProfile -File scripts/test_release_version.ps1
 bash scripts/test_release_publish.sh
 ```
 
-Windows 发布任务还会编译安装器并测试自启动路径匹配。安装 Inno Setup 6 后，可运行 `pwsh -NoProfile -File scripts/test_autostart_cleanup.ps1`；该测试使用临时载荷，不执行产品安装或卸载，也不修改自启动注册表。
+Windows 发布任务还会编译安装器并测试自启动路径匹配与旧版本卸载逻辑。安装 Inno Setup 6 后，可运行：
+
+```powershell
+pwsh -NoProfile -File scripts/test_autostart_cleanup.ps1
+pwsh -NoProfile -File scripts/test_legacy_install.ps1
+```
+
+两个测试都使用临时夹具，不执行产品安装或卸载，也不修改自启动注册表。
 
 ## 打包安装包（Windows）
 
@@ -628,9 +672,21 @@ Linux 便携版需要系统提供 GTK 3、Ayatana AppIndicator（或 AppIndicato
 
 `update prepare`、`launch`、`apply` 为客户端与外部助手的内部协议；`mark-portable` 仅由构建脚本在完整 bundle 内调用。CI 在 Linux 运行竞态检查，并在 Windows/macOS 运行临时夹具升级测试。
 
-安装程序为**按用户安装**（无需管理员权限），安装到
+安装程序为**按用户安装**（无需管理员权限），默认安装到
 `%LOCALAPPDATA%\Programs\Portway`，创建开始菜单与桌面快捷方式。
+安装向导始终显示「选择目标位置」页，可改到任意目录——包括覆盖安装时。
 卸载时会移除指向本安装目录的用户级自启动项；指向其他安装目录的条目会保留。用户目录 `~/.portway/` 中的配置与服务发现文件会保留。
+
+项目曾用名「SSH 隧道管理器 / SSH Tunnel Manager」，旧版安装目录是
+`%LOCALAPPDATA%\Programs\SSH Tunnel Manager`。新旧版本共用同一个 `AppId`，
+Inno Setup 因此把它们视为同一产品：直接覆盖安装会沿用注册表里的旧路径，继续装进
+旧目录。安装程序因此在开始前**先静默卸载已安装的旧版本**（见
+`scripts/legacy_install.iss`），再走全新安装流程，装到名字正确的目录。
+
+卸载只针对本项目：读的是同一 `AppId` 的卸载信息，且限定当前用户（`HKCU`）下登记的，
+不碰其他软件，也不碰用户配置目录 `~/.portway`。若当初选择「为所有用户安装」（`HKLM`），
+静默卸载需要管理员权限而本安装程序是 `PrivilegesRequired=lowest`，这种情况留给
+Inno Setup 自己的升级逻辑处理。
 
 需要管理员级（Program Files）安装时，把 `installer.iss` 里的
 `PrivilegesRequired=lowest` 改为 `admin`、`DefaultDirName` 改为 `{autopf}\Portway` 即可。
@@ -647,3 +703,6 @@ Linux 便携版需要系统提供 GTK 3、Ayatana AppIndicator（或 AppIndicato
 - **FRP 不做流量统计**：frpc 侧的 frp 库不提供流量数据，界面只展示代理的连接状态、远端地址与错误
 - **FRP 访问端暂不可编辑**：`stcp` / `xtcp` / `sudp` 的 visitor 在界面上只能启停与删除
 - 嵌入 frp 库会让进程内引擎动态库增大约 13 MB（纯 Go 依赖，不需要额外的 C 工具链）
+- **端口占用查询的平台差异**：Windows 走 iphlpapi（`netstat -ano` 作为回退），Linux 读 `/proc/net/*`，macOS 依赖 `lsof`。非 Windows 平台上的行为差异见「端口占用查询 → 权限」
+- **端口查询只覆盖本机**：不查询远端主机上端口是否被占用，远端冲突要靠隧道启动报错或「诊断连接」发现
+- **端口查询不做历史记录**：只反映当前时刻的占用情况，不保留「谁曾经占过这个端口」

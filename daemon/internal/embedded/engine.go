@@ -285,6 +285,86 @@ func (e *Engine) DiagnoseTunnel(name string) string {
 	return result(e.app.DiagnoseTunnel(ctx, name))
 }
 
+// ---------- 端口占用 ----------
+
+// ScanPorts 扫描本机端口占用。
+//
+// 筛选参数走 JSON payload 而不是多个字符串参数：Dart 侧的 _EngineCall 最多
+// 支持 3 个字符串参数，而筛选有 5 个（q / protocol / scope / system /
+// with_command_line）。用 JSON 更稳，也和 BatchTunnels 的既有做法一致。
+func (e *Engine) ScanPorts(payload string) string {
+	var input struct {
+		Query    string `json:"q"`
+		Protocol string `json:"protocol"`
+		Scope    string `json:"scope"`
+		// System 用指针区分「未指定」与「显式 false」：
+		// 前者不过滤，后者只返回非系统进程。
+		System          *bool `json:"system"`
+		WithCommandLine bool  `json:"with_command_line"`
+	}
+	if payload != "" {
+		if err := decodeStrict(payload, &input); err != nil {
+			return fail(err)
+		}
+	}
+	return result(e.app.ScanPorts(app.PortQuery{
+		Text:            input.Query,
+		Protocol:        input.Protocol,
+		Scope:           input.Scope,
+		System:          input.System,
+		WithCommandLine: input.WithCommandLine,
+	}))
+}
+
+// CheckPort 检测单个端口是否被占用。protocol 为空时同时检查 TCP 与 UDP。
+//
+// 参数走 JSON payload 而不是「int + 字符串」两个参数：Dart 侧的 _EngineCall
+// 只支持字符串参数，混入 int 需要另开一条分派路径，不值得。
+func (e *Engine) CheckPort(payload string) string {
+	var input struct {
+		Port     int    `json:"port"`
+		Protocol string `json:"protocol"`
+	}
+	if err := decodeStrict(payload, &input); err != nil {
+		return fail(err)
+	}
+	return result(e.app.CheckPort(input.Port, input.Protocol))
+}
+
+// KillProcess 结束占用端口的进程。
+//
+// PID 用指针接收：缺字段与显式传 0 语义不同（后者是「想结束空闲进程」，
+// 由保护规则拒绝并给出准确提示），与 HTTP 侧保持一致。
+func (e *Engine) KillProcess(payload string) string {
+	var input struct {
+		PID   *int `json:"pid"`
+		Force bool `json:"force"`
+	}
+	if err := decodeStrict(payload, &input); err != nil {
+		return fail(err)
+	}
+	if input.PID == nil {
+		return fail(errors.New("缺少 pid 参数"))
+	}
+	return result(e.app.KillProcess(*input.PID, input.Force))
+}
+
+// ResolveProcessPath 把 PID 解析成可执行文件的绝对路径。
+//
+// 只返回路径，实际打开文件管理器由客户端执行。
+func (e *Engine) ResolveProcessPath(payload string) string {
+	var input struct {
+		PID *int `json:"pid"`
+	}
+	if err := decodeStrict(payload, &input); err != nil {
+		return fail(err)
+	}
+	if input.PID == nil {
+		return fail(errors.New("缺少 pid 参数"))
+	}
+	return result(e.app.ResolveProcessPath(*input.PID))
+}
+
 // ---------- SSH 连接 ----------
 
 // AddSSHConnection / UpdateSSHConnection / DeleteSSHConnection 维护 SSH 连接。

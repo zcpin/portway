@@ -21,6 +21,7 @@ import 'pages/connections_page.dart';
 import 'pages/frp_page.dart';
 import 'pages/keys_page.dart';
 import 'pages/logs_page.dart';
+import 'pages/ports_page.dart';
 import 'pages/settings_page.dart';
 import 'pages/tunnels_page.dart';
 import 'pages/workspace_switcher.dart';
@@ -109,13 +110,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WindowListener {
     (icon: Icons.dns_outlined, label: 'SSH 连接'),
     (icon: Icons.cloud_outlined, label: 'FRP'),
     (icon: Icons.key_outlined, label: '密钥'),
+    (icon: Icons.lan_outlined, label: '端口'),
     (icon: Icons.terminal_outlined, label: '日志'),
     (icon: Icons.settings_outlined, label: '设置'),
     (icon: Icons.info_outline, label: '关于'),
   ];
 
   /// 「设置」页在导航中的下标；其后的页面（设置、关于）不依赖 daemon，断开时也能访问。
-  static const _settingsIndex = 5;
+  ///
+  /// 这个常量决定哪些页面在未连接时不显示引导页，插入导航项时必须同步改，
+  /// 否则设置页会在断开时不可访问。
+  static const _settingsIndex = 6;
 
   /// 导航对应的页面。设置 / 关于无需连接 daemon 即可渲染。
   List<Widget> get _pages => [
@@ -123,6 +128,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WindowListener {
     const ConnectionsPage(),
     const FrpPage(),
     const KeysPage(),
+    const PortsPage(),
     const LogsPage(),
     SettingsPage(onQuitForUpdate: _quit),
     const AboutPage(),

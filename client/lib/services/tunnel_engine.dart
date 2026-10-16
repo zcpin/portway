@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 
 import '../models.dart';
 import '../models/frp.dart';
+import '../models/port.dart';
 import '../models/tunnel_diagnostic.dart';
 
 /// 客户端与隧道引擎之间的统一契约。
@@ -102,6 +103,33 @@ abstract class TunnelEngine {
 
   /// 锁定已解锁的私钥。已建立的连接继续运行，原文件不会被改写。
   Future<void> lockKey(String path);
+
+  // ---------- 端口占用 ----------
+
+  /// 扫描本机端口占用，按 [filter] 筛选后返回。
+  ///
+  /// 筛选在服务端完成：端口条目在几百到几千量级，每次刷新都要重新采集，
+  /// 服务端筛选能避免把全量数据传过来再过滤。
+  Future<PortSnapshot> getPorts([PortFilter filter = const PortFilter()]);
+
+  /// 检测单个端口是否被占用。
+  ///
+  /// [protocol] 为空时同时检查 TCP 与 UDP（排查 UDP 冲突时要用）；
+  /// 隧道编辑器必须传 `tcp`——隧道不涉及 UDP，把 UDP 冲突报成
+  /// 「端口不可用」会误导用户。
+  Future<PortCheck> checkPort(int port, {String protocol = ''});
+
+  /// 结束占用端口的进程。
+  ///
+  /// 保护规则在引擎侧判定，命中时返回的 [KillResult.code] 是 `protected`，
+  /// 界面据此给出不同文案，而不是一律显示「失败」。
+  Future<KillResult> killProcess(int pid, {bool force = false});
+
+  /// 把 PID 解析成可执行文件的绝对路径。
+  ///
+  /// 只解析路径，实际打开文件管理器由客户端执行：daemon 可能是系统服务，
+  /// 以 LocalSystem 身份 explorer 打开的窗口不属于用户桌面会话。
+  Future<String> resolveProcessPath(int pid);
 
   // ---------- 日志与配置 ----------
 
