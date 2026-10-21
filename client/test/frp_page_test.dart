@@ -24,7 +24,7 @@ class _Clients extends FrpClientsNotifier {
           'local_ip': '127.0.0.1',
           'local_port': 3306,
           'remote_port': 13306,
-          'phase': 'start',
+          'phase': 'running',
           'remote_addr': 'frps.example.com:13306',
         },
         {'name': 'redis', 'type': 'tcp', 'enabled': false, 'local_port': 6379, 'remote_port': 16379},

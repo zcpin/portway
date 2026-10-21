@@ -126,13 +126,17 @@ class FrpProxy {
         _ => type.toUpperCase(),
       };
 
-  /// 代理的运行状态。frp 的 phase 取值见其 proxy.WorkingStatus。
+  /// 代理的运行状态。frp 的 phase 取值见其 proxy 包的 ProxyPhase* 常量：
+  /// v0.71.0 起为 new / wait start / start error / running / check failed / closed，
+  /// 旧版（<= 0.52）为 new / waiting / start / closed，两套都对上。
   String get stateLabel {
     if (!enabled) return '已停用';
     if (lastError.isNotEmpty) return '失败';
     return switch (phase) {
-      'start' => '已连接',
-      'new' || 'waiting' => '连接中',
+      'running' || 'start' => '已连接',
+      'new' || 'wait start' || 'waiting' => '连接中',
+      'start error' => '失败',
+      'check failed' => '检查失败',
       'closed' => '已断开',
       _ => '未运行',
     };

@@ -56,13 +56,19 @@ void main() {
           'last_error': error,
         });
 
+    // frp v0.71.0 的 phase 取值（proxy 包 ProxyPhase* 常量）
+    expect(proxy('running').stateLabel, '已连接');
+    expect(proxy('wait start').stateLabel, '连接中');
+    expect(proxy('start error').stateLabel, '失败');
+    expect(proxy('check failed').stateLabel, '检查失败');
+    // 旧版 frp（<= 0.52）的取值保持兼容
     expect(proxy('start').stateLabel, '已连接');
     expect(proxy('waiting').stateLabel, '连接中');
     expect(proxy('new').stateLabel, '连接中');
     expect(proxy('closed').stateLabel, '已断开');
     expect(proxy('').stateLabel, '未运行');
-    expect(proxy('start', enabled: false).stateLabel, '已停用');
-    expect(proxy('start', error: '端口被占用').stateLabel, '失败');
+    expect(proxy('running', enabled: false).stateLabel, '已停用');
+    expect(proxy('running', error: '端口被占用').stateLabel, '失败');
   });
 
   test('代理给出可读的本地与远端地址', () {
